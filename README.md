@@ -13,19 +13,19 @@ Send bytes from standard input to a network address.
 Send to a TCP endpoint:
 
 ```bash
-echo 'hola' | ./bin/x86_64/linux/nets 127.0.0.1:8080
+echo 'hola' | nets 127.0.0.1:8080
 ```
 
 Send to port 80 by default:
 
 ```bash
-echo 'hola' | ./bin/x86_64/linux/nets 127.0.0.1
+echo 'hola' | nets 127.0.0.1
 ```
 
 Send a UDP datagram:
 
 ```bash
-echo 'hola' | ./bin/x86_64/linux/nets 127.0.0.1:8080 --udp
+echo 'hola' | nets 127.0.0.1:8080 --udp
 ```
 
 ---
@@ -47,7 +47,7 @@ echo 'hola' | ./bin/x86_64/linux/nets 127.0.0.1:8080 --udp
 ```c
 #include "nets.h"
 
-const char msg[] = "hola\n";
+const char msg[] = "hello\n";
 kc_nets_send("127.0.0.1", 8080, KC_NETS_TCP, msg, sizeof(msg) - 1);
 ```
 
