@@ -97,7 +97,7 @@ kc_test_tcp() {
     timeout 5s nc -l -p "$port" > "$out" 2>/dev/null &
     pid=$!
     sleep 0.2
-    if ! printf 'hola tcp' | "$BIN" "127.0.0.1:$port"; then
+    if ! printf 'hello tcp' | "$BIN" "127.0.0.1:$port"; then
         kill "$pid" 2>/dev/null
         kc_test_fail "tcp: send failed"
         return 1
@@ -106,7 +106,7 @@ kc_test_tcp() {
         kc_test_fail "tcp: server failed"
         return 1
     }
-    if [ "$(cat "$out")" != "hola tcp" ]; then
+    if [ "$(cat "$out")" != "hello tcp" ]; then
         kc_test_fail "tcp: payload mismatch"
         return 1
     fi
@@ -122,7 +122,7 @@ kc_test_udp() {
     timeout 5s nc -u -l -p "$port" > "$out" 2>/dev/null &
     pid=$!
     sleep 0.2
-    if ! printf 'hola udp' | "$BIN" "127.0.0.1:$port" --udp; then
+    if ! printf 'hello udp' | "$BIN" "127.0.0.1:$port" --udp; then
         kill "$pid" 2>/dev/null
         kc_test_fail "udp: send failed"
         return 1
@@ -130,7 +130,7 @@ kc_test_udp() {
     sleep 0.2
     kill "$pid" 2>/dev/null
     wait "$pid" 2>/dev/null || true
-    if [ "$(cat "$out")" != "hola udp" ]; then
+    if [ "$(cat "$out")" != "hello udp" ]; then
         kc_test_fail "udp: payload mismatch"
         return 1
     fi
