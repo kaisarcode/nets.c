@@ -23,6 +23,67 @@ extern "C" {
 #define KC_NETS_TCP       1
 #define KC_NETS_UDP       2
 
+typedef struct {
+    int reserved;
+} kc_nets_options_t;
+
+typedef void (*kc_nets_signal_callback_t)(void);
+
+/**
+ * Returns default-initialized options.
+ * @return Default-initialized options.
+ */
+kc_nets_options_t kc_nets_options_default(void);
+
+/**
+ * Loads environment variables into options.
+ * @param opts Options to update.
+ * @return None.
+ */
+void kc_nets_options_load_env(kc_nets_options_t *opts);
+
+/**
+ * Frees options resources.
+ * @param opts Options to free.
+ * @return None.
+ */
+void kc_nets_options_free(kc_nets_options_t *opts);
+
+/**
+ * Registers a signal callback.
+ * @param sig Signal number.
+ * @param cb Callback function, or NULL to unregister.
+ * @return KC_NETS_OK on success, or a negative error code.
+ */
+int kc_nets_on_signal(int sig, kc_nets_signal_callback_t cb);
+
+/**
+ * Raises a signal to registered callbacks.
+ * @param sig Signal number.
+ * @return KC_NETS_OK on success, or a negative error code.
+ */
+int kc_nets_raise_signal(int sig);
+
+/**
+ * Listens for registered signals.
+ * @return KC_NETS_OK on success, or a negative error code.
+ */
+int kc_nets_listen_signals(void);
+
+/**
+ * Listens for a specific signal.
+ * @param sig_id Signal number.
+ * @return KC_NETS_OK on success, or a negative error code.
+ */
+int kc_nets_listen_signal(int sig_id);
+
+/**
+ * Default signal listener.
+ * @param sig Signal number.
+ * @return None.
+ */
+void kc_nets_signal_listener(int sig);
+
 /**
  * Sends bytes to one network address.
  * @param host Destination host or IP address.

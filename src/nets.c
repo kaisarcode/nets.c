@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define KC_NETS_VERSION "1.0.0"
+#define KC_NETS_VERSION "1.1.0"
 
 /**
  * Prints command usage information.
@@ -126,6 +126,7 @@ unsigned short *port
  * @return Process status code.
  */
 int main(int argc, char **argv) {
+    kc_nets_options_t opts = kc_nets_options_default();
     char host[512];
     char *data = NULL;
     size_t size = 0;
@@ -134,26 +135,34 @@ int main(int argc, char **argv) {
     int rc;
     int i;
 
+    kc_nets_options_load_env(&opts);
+    kc_nets_listen_signals();
+
     if (argc >= 2) {
         if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
             kc_nets_help(argv[0]);
+            kc_nets_options_free(&opts);
             return 0;
         }
         if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0) {
             kc_nets_version();
+            kc_nets_options_free(&opts);
             return 0;
         }
     }
     if (argc < 2) {
         kc_nets_help(argv[0]);
+        kc_nets_options_free(&opts);
         return 1;
     }
     if (argv[1][0] == '-') {
         fprintf(stderr, "nets: unknown option '%s'\n", argv[1]);
+        kc_nets_options_free(&opts);
         return 1;
     }
     if (kc_nets_parse_addr(argv[1], host, sizeof(host), &port) != 0) {
         fprintf(stderr, "nets: invalid address\n");
+        kc_nets_options_free(&opts);
         return 1;
     }
     for (i = 2; i < argc; i++) {
@@ -163,15 +172,18 @@ int main(int argc, char **argv) {
             proto = KC_NETS_UDP;
         } else {
             fprintf(stderr, "nets: unknown option '%s'\n", argv[i]);
+            kc_nets_options_free(&opts);
             return 1;
         }
     }
     if (kc_nets_read_stdin(&data, &size) != 0) {
         fprintf(stderr, "nets: failed to read stdin\n");
+        kc_nets_options_free(&opts);
         return 1;
     }
     rc = kc_nets_send(host, port, proto, data, size);
     free(data);
+    kc_nets_options_free(&opts);
     if (rc != KC_NETS_OK) {
         fprintf(stderr, "nets: %s\n", kc_nets_strerror(rc));
         return 1;

@@ -22,6 +22,140 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+
+#include <stddef.h>
+
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#  define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <windows.h>
+#else
+#  include <signal.h>
+#endif
+
+typedef struct {
+    int sig;
+    kc_nets_signal_callback_t cb;
+} kc_nets_signal_entry_t;
+
+static kc_nets_signal_entry_t *g_signal_handlers = NULL;
+static int g_n_signal_handlers = 0;
+static int g_signal_handlers_capacity = 0;
+
+/**
+ * Returns default-initialized options.
+ * @return Default-initialized options.
+ */
+kc_nets_options_t kc_nets_options_default(void) {
+    kc_nets_options_t opts;
+    memset(&opts, 0, sizeof(opts));
+    return opts;
+}
+
+/**
+ * Loads environment variables into options.
+ * @param opts Options to update.
+ * @return None.
+ */
+void kc_nets_options_load_env(kc_nets_options_t *opts) {
+    (void)opts;
+}
+
+/**
+ * Frees options resources.
+ * @param opts Options to free.
+ * @return None.
+ */
+void kc_nets_options_free(kc_nets_options_t *opts) {
+    (void)opts;
+}
+
+/**
+ * Registers a signal callback.
+ * @param sig Signal number.
+ * @param cb Callback function, or NULL to unregister.
+ * @return KC_NETS_OK on success, or a negative error code.
+ */
+int kc_nets_on_signal(int sig, kc_nets_signal_callback_t cb) {
+    int i;
+    for (i = 0; i < g_n_signal_handlers; i++) {
+        if (g_signal_handlers[i].sig == sig) {
+            if (cb) {
+                g_signal_handlers[i].cb = cb;
+            } else {
+                int tail = g_n_signal_handlers - i - 1;
+                if (tail > 0) {
+                    memmove(&g_signal_handlers[i], &g_signal_handlers[i + 1],
+                            (size_t)tail * sizeof(kc_nets_signal_entry_t));
+                }
+                g_n_signal_handlers--;
+            }
+            return KC_NETS_OK;
+        }
+    }
+    if (!cb) return KC_NETS_OK;
+    if (g_n_signal_handlers >= g_signal_handlers_capacity) {
+        int new_cap = g_signal_handlers_capacity ? g_signal_handlers_capacity * 2 : 4;
+        kc_nets_signal_entry_t *p = (kc_nets_signal_entry_t *)realloc(g_signal_handlers,
+            (size_t)new_cap * sizeof(kc_nets_signal_entry_t));
+        if (!p) return KC_NETS_EINVAL;
+        g_signal_handlers = p;
+        g_signal_handlers_capacity = new_cap;
+    }
+    g_signal_handlers[g_n_signal_handlers].sig = sig;
+    g_signal_handlers[g_n_signal_handlers].cb = cb;
+    g_n_signal_handlers++;
+    return KC_NETS_OK;
+}
+
+/**
+ * Raises a signal to registered callbacks.
+ * @param sig Signal number.
+ * @return KC_NETS_OK on success, or a negative error code.
+ */
+int kc_nets_raise_signal(int sig) {
+    int i;
+    for (i = 0; i < g_n_signal_handlers; i++) {
+        if (g_signal_handlers[i].sig == sig) {
+            g_signal_handlers[i].cb();
+            return KC_NETS_OK;
+        }
+    }
+    return KC_NETS_EINVAL;
+}
+
+/**
+ * Listens for registered signals.
+ * @return KC_NETS_OK on success, or a negative error code.
+ */
+int kc_nets_listen_signals(void) {
+    return KC_NETS_OK;
+}
+
+/**
+ * Listens for a specific signal.
+ * @param sig_id Signal number.
+ * @return KC_NETS_OK on success, or a negative error code.
+ */
+int kc_nets_listen_signal(int sig_id) {
+#ifdef _WIN32
+    (void)sig_id;
+#else
+    signal(sig_id, kc_nets_signal_listener);
+#endif
+    return KC_NETS_OK;
+}
+
+/**
+ * Default signal listener.
+ * @param sig Signal number.
+ * @return None.
+ */
+void kc_nets_signal_listener(int sig) {
+    kc_nets_raise_signal(sig);
+}
 
 #ifdef _WIN32
 typedef SOCKET kc_nets_socket_t;
