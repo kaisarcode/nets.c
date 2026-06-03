@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define KC_NETS_VERSION "1.1.0"
+#define KC_NETS_VERSION "1.1.1"
 
 /**
  * Prints command usage information.

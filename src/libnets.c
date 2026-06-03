@@ -25,6 +25,7 @@
 #include <stdlib.h>
 
 #include <stddef.h>
+#include <signal.h>
 
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -154,7 +155,10 @@ int kc_nets_listen_signal(int sig_id) {
  * @return None.
  */
 void kc_nets_signal_listener(int sig) {
-    kc_nets_raise_signal(sig);
+    if (kc_nets_raise_signal(sig) == 0)
+        return;
+    signal(sig, SIG_DFL);
+    raise(sig);
 }
 
 #ifdef _WIN32

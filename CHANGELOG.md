@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## v1.1.1
+
+- Fixed `nets_signal_listener` to restore default signal behavior (SIG_DFL)
+  when no `on_signal` handler is registered. Added missing `<signal.h>` include.
+
 ## v1.1.0
 
 - Added data-driven configuration lifecycle through `kc_nets_options_t`.
