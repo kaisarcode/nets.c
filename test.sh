@@ -1,5 +1,4 @@
 #!/bin/sh
-# Network sender CLI test harness.
 # Summary: Validation suite for nets network sending.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
