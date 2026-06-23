@@ -13,19 +13,19 @@ Send bytes from standard input to a network address.
 Send to a TCP endpoint:
 
 ```bash
-echo 'hola' | nets 127.0.0.1:8080
+echo 'hello' | nets 127.0.0.1:8080
 ```
 
 Send to port 80 by default:
 
 ```bash
-echo 'hola' | nets 127.0.0.1
+echo 'hello' | nets 127.0.0.1
 ```
 
 Send a UDP datagram:
 
 ```bash
-echo 'hola' | nets 127.0.0.1:8080 --udp
+echo 'hello' | nets 127.0.0.1:8080 --udp
 ```
 
 ---
@@ -72,7 +72,7 @@ make clean && make
 
 ### Multiarch Builds
 
-The project is prepared to build artifacts for multiple architectures under `bin/{arch}/{platform}/`. A plain `make` builds only the current host architecture, while the targets below build the full matrix or a specific target.
+The project is prepared to build artifacts for multiple architectures under `bin/{arch}/{platform}/`. A plain `make` builds only the current host architecture.
 
 ```bash
 make all
@@ -108,4 +108,4 @@ If you'd like to reach out, you can send an email to kaisar@kaisarcode.com. Plea
 
 [![GPLv3](https://www.gnu.org/graphics/gplv3-127x51.png)](https://www.gnu.org/licenses/gpl-3.0.html)
 
-This project is distributed under the **GNU General Public License version 3 (GPLv3)**. 
+This project is distributed under the **GNU General Public License version 3 (GPLv3)**.
