@@ -331,3 +331,15 @@ const char *kc_nets_strerror(int code) {
         default: return "unknown error";
     }
 }
+
+#ifndef KC_NETS_BUILD_VERSION
+#define KC_NETS_BUILD_VERSION 0
+#endif
+
+/**
+ * Returns the build version generated at compile time.
+ * @return Unix timestamp for the current build.
+ */
+uint64_t kc_nets_version(void) {
+    return (uint64_t)KC_NETS_BUILD_VERSION;
+}

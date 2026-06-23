@@ -12,6 +12,37 @@ NDK_TOOLCHAIN := $(NDK_DIR)/build/cmake/android.toolchain.cmake
 
 BUILD_DIR := .build
 BIN_DIR   := bin
+BUILD_VERSION ?= $(shell date +%s)
+
+define cmake_build
+	@prelog=$$(mktemp); \
+	if ! cmake --build $(1) -- -n > "$$prelog" 2>&1; then \
+		cat "$$prelog"; \
+		rm -f "$$prelog"; \
+		exit 1; \
+	fi; \
+	if grep -q "ninja: no work to do." "$$prelog"; then \
+		rm -f "$$prelog"; \
+		cmake --build $(1); \
+		exit $$?; \
+	fi; \
+	rm -f "$$prelog"; \
+	if ! cmake --build $(1); then \
+		exit 1; \
+	fi; \
+	if [ -n "$(2)" ]; then \
+		ver=$$(date +%s); \
+		$(2); \
+		log=$$(mktemp); \
+		if ! cmake --build $(1) > "$$log" 2>&1; then \
+			cat "$$log"; \
+			rm -f "$$log"; \
+			exit 1; \
+		fi; \
+		rm -f "$$log"; \
+	fi; \
+	:
+endef
 
 HOST_ARCH       := $(shell uname -m)
 HOST_SYSTEM     := $(shell uname -s)
@@ -71,7 +102,7 @@ native:
 		echo "Unsupported native target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
 		exit 1; \
 	fi
-	@$(MAKE) $(NATIVE_TARGET)
+	@$(MAKE) BUILD_VERSION=$(BUILD_VERSION) $(NATIVE_TARGET)
 
 all: \
 	x86_64/linux x86_64/windows \
@@ -89,16 +120,20 @@ all: \
 
 define linux_target
 	@mkdir -p $(BIN_DIR)/$(1)/linux
-	@cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_SYSTEM_NAME=Linux \
-		-DCMAKE_C_COMPILER=$(2) \
-		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out \
-		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
-		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(subst /,-,$(1))-linux
-	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/nets $(BIN_DIR)/$(1)/linux/nets
+	@if [ ! -f $(BUILD_DIR)/$(subst /,-,$(1))-linux/CMakeCache.txt ]; then \
+		cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Linux \
+			-DNETS_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_C_COMPILER=$(2) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(subst /,-,$(1))-linux,cmake -S . -B $(BUILD_DIR)/$(subst /,-,$(1))-linux -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux -DNETS_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(subst /,-,$(1))-linux/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/linux -G Ninja -Wno-dev > /dev/null)
+	@cp $(BUILD_DIR)/$(subst /,-,$(1))-linux/out/nets $(BIN_DIR)/$(1)/linux/nets.tmp
+	@mv -f $(BIN_DIR)/$(1)/linux/nets.tmp $(BIN_DIR)/$(1)/linux/nets
 	@echo "OK $(1)/linux"
 endef
 
@@ -142,17 +177,22 @@ loongarch64/linux:
 
 define windows_target
 	@mkdir -p $(BIN_DIR)/$(1)/windows
-	@cmake -S . -B $(BUILD_DIR)/$(1)-windows \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_SYSTEM_NAME=Windows \
-		-DCMAKE_C_COMPILER=$(2) \
-		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out \
-		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(1)-windows
-	@cp $(BUILD_DIR)/$(1)-windows/out/nets.exe $(BIN_DIR)/$(1)/windows/nets.exe
-	@cp $(BUILD_DIR)/$(1)-windows/out/libnets.dll $(BIN_DIR)/$(1)/windows/libnets.dll
+	@if [ ! -f $(BUILD_DIR)/$(1)-windows/CMakeCache.txt ]; then \
+		cmake -S . -B $(BUILD_DIR)/$(1)-windows \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_SYSTEM_NAME=Windows \
+			-DNETS_BUILD_VERSION=$(BUILD_VERSION) \
+			-DCMAKE_C_COMPILER=$(2) \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-windows,cmake -S . -B $(BUILD_DIR)/$(1)-windows -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DNETS_BUILD_VERSION=$$ver -DCMAKE_C_COMPILER=$(2) -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-windows/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/windows -G Ninja -Wno-dev > /dev/null)
+	@cp $(BUILD_DIR)/$(1)-windows/out/nets.exe $(BIN_DIR)/$(1)/windows/nets.exe.tmp
+	@mv -f $(BIN_DIR)/$(1)/windows/nets.exe.tmp $(BIN_DIR)/$(1)/windows/nets.exe
+	@cp $(BUILD_DIR)/$(1)-windows/out/libnets.dll $(BIN_DIR)/$(1)/windows/libnets.dll.tmp
+	@mv -f $(BIN_DIR)/$(1)/windows/libnets.dll.tmp $(BIN_DIR)/$(1)/windows/libnets.dll
 	@echo "OK $(1)/windows"
 endef
 
@@ -166,17 +206,21 @@ i686/windows:
 
 define android_target
 	@mkdir -p $(BIN_DIR)/$(1)/android
-	@cmake -S . -B $(BUILD_DIR)/$(1)-android \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) \
-		-DANDROID_ABI=$(2) \
-		-DANDROID_PLATFORM=android-21 \
-		-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out \
-		-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
-		-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
-		-G Ninja -Wno-dev > /dev/null
-	@cmake --build $(BUILD_DIR)/$(1)-android
-	@cp $(BUILD_DIR)/$(1)-android/out/nets $(BIN_DIR)/$(1)/android/nets
+	@if [ ! -f $(BUILD_DIR)/$(1)-android/CMakeCache.txt ]; then \
+		cmake -S . -B $(BUILD_DIR)/$(1)-android \
+			-DCMAKE_BUILD_TYPE=Release \
+			-DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) \
+			-DNETS_BUILD_VERSION=$(BUILD_VERSION) \
+			-DANDROID_ABI=$(2) \
+			-DANDROID_PLATFORM=android-21 \
+			-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out \
+			-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
+			-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android \
+			-G Ninja -Wno-dev > /dev/null; \
+	fi
+	$(call cmake_build,$(BUILD_DIR)/$(1)-android,cmake -S . -B $(BUILD_DIR)/$(1)-android -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=$(NDK_TOOLCHAIN) -DNETS_BUILD_VERSION=$$ver -DANDROID_ABI=$(2) -DANDROID_PLATFORM=android-21 -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(CURDIR)/$(BUILD_DIR)/$(1)-android/out -DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(CURDIR)/$(BIN_DIR)/$(1)/android -G Ninja -Wno-dev > /dev/null)
+	@cp $(BUILD_DIR)/$(1)-android/out/nets $(BIN_DIR)/$(1)/android/nets.tmp
+	@mv -f $(BIN_DIR)/$(1)/android/nets.tmp $(BIN_DIR)/$(1)/android/nets
 	@echo "OK $(1)/android"
 endef
 

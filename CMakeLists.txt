@@ -3,6 +3,10 @@ project(nets C)
 
 set(CMAKE_C_STANDARD 11)
 
+if(NOT DEFINED NETS_BUILD_VERSION)
+    set(NETS_BUILD_VERSION 0)
+endif()
+
 
 option(NETS_NATIVE "Enable native hardware optimizations" OFF)
 
@@ -15,6 +19,10 @@ if(NOT MSVC)
 else()
     add_compile_options(/O2 /W3 /WX)
 endif()
+
+set_source_files_properties(src/libnets.c PROPERTIES
+    COMPILE_DEFINITIONS KC_NETS_BUILD_VERSION=${NETS_BUILD_VERSION}
+)
 
 # Main executable
 add_executable(nets

@@ -13,8 +13,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define KC_NETS_VERSION "1.1.1"
-
 /**
  * Prints command usage information.
  * @param name Program executable name.
@@ -34,8 +32,8 @@ static void kc_nets_help(const char *name) {
  * Prints command version information.
  * @return None.
  */
-static void kc_nets_version(void) {
-    printf("nets %s\n", KC_NETS_VERSION);
+static void kc_nets_cli_version(void) {
+    printf("nets build %llu\n", (unsigned long long)kc_nets_version());
 }
 
 /**
@@ -145,7 +143,7 @@ int main(int argc, char **argv) {
             return 0;
         }
         if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0) {
-            kc_nets_version();
+            kc_nets_cli_version();
             kc_nets_options_free(&opts);
             return 0;
         }

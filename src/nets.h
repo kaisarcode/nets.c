@@ -11,6 +11,7 @@
 #define KC_NETS_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -107,6 +108,12 @@ size_t size
  * @return Static message.
  */
 const char *kc_nets_strerror(int code);
+
+/**
+ * Returns the build version generated at compile time.
+ * @return Unix timestamp for the current build.
+ */
+uint64_t kc_nets_version(void);
 
 #ifdef __cplusplus
 }
