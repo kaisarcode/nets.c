@@ -62,7 +62,6 @@ kc_test_check_binary() {
         kc_test_fail "timeout tool check: expected timeout executable in PATH, but it was not found"
         return 1
     fi
-    kc_test_pass "required binaries and tools are present"
     return 0
 }
 
