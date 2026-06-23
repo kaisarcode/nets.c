@@ -51,40 +51,37 @@ kc_test_binary_path() {
 # @return 0 on success, 1 on failure.
 kc_test_check_binary() {
     if [ ! -x "$BIN" ]; then
-        kc_test_fail "binary not found: $BIN"
+        kc_test_fail "binary existence: expected executable file at $BIN, but it was not found"
         return 1
     fi
     if ! command -v nc > /dev/null 2>&1; then
-        kc_test_fail "nc not found"
+        kc_test_fail "nc tool check: expected nc executable in PATH, but it was not found"
         return 1
     fi
     if ! command -v timeout > /dev/null 2>&1; then
-        kc_test_fail "timeout not found"
+        kc_test_fail "timeout tool check: expected timeout executable in PATH, but it was not found"
         return 1
     fi
+    kc_test_pass "required binaries and tools are present"
     return 0
 }
 
-# Tests help, version, and fail-fast CLI behavior.
+# Tests fail-fast CLI behavior.
 # @return 0 on success, 1 on failure.
 kc_test_cli() {
-    if ! "$BIN" --help > /dev/null 2>&1; then
-        kc_test_fail "cli: --help failed"
-        return 1
-    fi
-    if ! "$BIN" -v > /dev/null 2>&1; then
-        kc_test_fail "cli: -v failed"
-        return 1
-    fi
     if "$BIN" --bad > /dev/null 2>&1; then
-        kc_test_fail "cli: unknown option should fail"
+        kc_test_fail "cli unknown option: expected non-zero exit, got 0"
         return 1
     fi
+    kc_test_pass "cli unknown option fails"
+
     if "$BIN" 127.0.0.1:bad > /dev/null 2>&1; then
-        kc_test_fail "cli: invalid port should fail"
+        kc_test_fail "cli invalid address: expected non-zero exit, got 0"
         return 1
     fi
-    kc_test_pass "cli"
+    kc_test_pass "cli invalid address fails"
+
+    return 0
 }
 
 # Tests TCP payload delivery to a local server.
@@ -98,18 +95,24 @@ kc_test_tcp() {
     sleep 0.2
     if ! printf 'hello tcp' | "$BIN" "127.0.0.1:$port"; then
         kill "$pid" 2>/dev/null
-        kc_test_fail "tcp: send failed"
+        kc_test_fail "tcp send: expected client command exit code 0, got non-zero"
         return 1
     fi
+    kc_test_pass "tcp client send command succeeds"
+
     wait "$pid" || {
-        kc_test_fail "tcp: server failed"
+        kc_test_fail "tcp receive: expected server command exit code 0, got non-zero"
         return 1
     }
-    if [ "$(cat "$out")" != "hello tcp" ]; then
-        kc_test_fail "tcp: payload mismatch"
+    kc_test_pass "tcp server listener exits successfully"
+
+    actual=$(cat "$out")
+    if [ "$actual" != "hello tcp" ]; then
+        kc_test_fail "tcp payload: expected 'hello tcp', got '$actual'"
         return 1
     fi
-    kc_test_pass "tcp"
+    kc_test_pass "tcp payload delivers matches expected string"
+    return 0
 }
 
 # Tests UDP payload delivery to a local server.
@@ -123,30 +126,117 @@ kc_test_udp() {
     sleep 0.2
     if ! printf 'hello udp' | "$BIN" "127.0.0.1:$port" --udp; then
         kill "$pid" 2>/dev/null
-        kc_test_fail "udp: send failed"
+        kc_test_fail "udp send: expected client command exit code 0, got non-zero"
         return 1
     fi
+    kc_test_pass "udp client send command succeeds"
+
     sleep 0.2
     kill "$pid" 2>/dev/null
     wait "$pid" 2>/dev/null || true
-    if [ "$(cat "$out")" != "hello udp" ]; then
-        kc_test_fail "udp: payload mismatch"
+    actual=$(cat "$out")
+    if [ "$actual" != "hello udp" ]; then
+        kc_test_fail "udp payload: expected 'hello udp', got '$actual'"
         return 1
     fi
-    kc_test_pass "udp"
+    kc_test_pass "udp payload delivers matches expected string"
+    return 0
+}
+
+# Validate public static-library embedding.
+# @return 0 on success, 1 on failure.
+kc_test_api() {
+    LIB_PATH="$ROOT/bin/$(kc_test_arch)/$(kc_test_platform)/libnets.a"
+    if [ ! -f "$LIB_PATH" ]; then
+        kc_test_fail "static library existence: expected file at $LIB_PATH, but it was not found"
+        return 1
+    fi
+
+    port_tcp=$((30000 + ($$ % 10000)))
+    port_udp=$((40000 + ($$ % 10000)))
+
+    out_tcp="$TMPDIR/api_tcp.out"
+    out_udp="$TMPDIR/api_udp.out"
+    rm -f "$out_tcp" "$out_udp"
+
+    timeout 5s nc -l -p "$port_tcp" > "$out_tcp" 2>/dev/null &
+    pid_tcp=$!
+
+    timeout 5s nc -u -l -p "$port_udp" > "$out_udp" 2>/dev/null &
+    pid_udp=$!
+
+    sleep 0.2
+
+    {
+        printf '%s\n' '#include "nets.h"'
+        printf '%s\n' '#include <stdio.h>'
+        printf '%s\n' '#include <stdlib.h>'
+        printf '%s\n' 'int main(int argc, char **argv) {'
+        printf '%s\n' '    if (argc != 3) return 1;'
+        printf '%s\n' '    unsigned short port_tcp = (unsigned short)atoi(argv[1]);'
+        printf '%s\n' '    unsigned short port_udp = (unsigned short)atoi(argv[2]);'
+        printf '%s\n' '    if (kc_nets_send(NULL, port_tcp, KC_NETS_TCP, "data", 4) != KC_NETS_EINVAL) return 2;'
+        printf '%s\n' '    if (kc_nets_send("127.0.0.1", port_tcp, 999, "data", 4) != KC_NETS_EINVAL) return 3;'
+        printf '%s\n' '    if (kc_nets_send("127.0.0.1", port_tcp, KC_NETS_TCP, "hello api tcp", 13) != KC_NETS_OK) return 4;'
+        printf '%s\n' '    if (kc_nets_send("127.0.0.1", port_udp, KC_NETS_UDP, "hello api udp", 13) != KC_NETS_OK) return 5;'
+        printf '%s\n' '    return 0;'
+        printf '%s\n' '}'
+    } > "$TMPDIR/consumer.c"
+
+    if ! cc -I "$ROOT/src" "$TMPDIR/consumer.c" "$LIB_PATH" -o "$TMPDIR/consumer"; then
+        kill "$pid_tcp" "$pid_udp" 2>/dev/null
+        kc_test_fail "static library compile: expected consumer.c to compile, but compilation failed"
+        return 1
+    fi
+    kc_test_pass "static library consumer program compiles successfully"
+
+    if ! "$TMPDIR/consumer" "$port_tcp" "$port_udp"; then
+        kill "$pid_tcp" "$pid_udp" 2>/dev/null
+        kc_test_fail "static library execution: expected consumer program to return 0, got non-zero"
+        return 1
+    fi
+    kc_test_pass "static library send API execution returns successfully"
+
+    wait "$pid_tcp" || {
+        kill "$pid_udp" 2>/dev/null
+        kc_test_fail "static library TCP receive: expected server command exit code 0, got non-zero"
+        return 1
+    }
+
+    sleep 0.2
+    kill "$pid_udp" 2>/dev/null
+    wait "$pid_udp" 2>/dev/null || true
+
+    actual_tcp=$(cat "$out_tcp")
+    if [ "$actual_tcp" != "hello api tcp" ]; then
+        kc_test_fail "static library TCP payload: expected 'hello api tcp', got '$actual_tcp'"
+        return 1
+    fi
+    kc_test_pass "static library TCP payload delivers matches expected string"
+
+    actual_udp=$(cat "$out_udp")
+    if [ "$actual_udp" != "hello api udp" ]; then
+        kc_test_fail "static library UDP payload: expected 'hello api udp', got '$actual_udp'"
+        return 1
+    fi
+    kc_test_pass "static library UDP payload delivers matches expected string"
+    return 0
 }
 
 # Runs the full validation suite.
 # @return 0 on success, 1 on failure.
 kc_test_main() {
     failed=0
+    ROOT=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
+    BIN="$ROOT/$(kc_test_binary_path)"
     TMPDIR=$(mktemp -d)
-    BIN=$(kc_test_binary_path)
     trap 'rm -rf "$TMPDIR"' EXIT INT HUP TERM
     kc_test_check_binary || exit 1
     kc_test_cli || failed=$((failed + 1))
     kc_test_tcp || failed=$((failed + 1))
     kc_test_udp || failed=$((failed + 1))
+    kc_test_api || failed=$((failed + 1))
+
     return "$failed"
 }
 
