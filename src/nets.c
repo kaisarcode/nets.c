@@ -125,6 +125,7 @@ unsigned short *port
  */
 int main(int argc, char **argv) {
     kc_nets_options_t opts = kc_nets_options_default();
+    kc_nets_t *ctx = NULL;
     char host[512];
     char *data = NULL;
     size_t size = 0;
@@ -134,7 +135,6 @@ int main(int argc, char **argv) {
     int i;
 
     kc_nets_options_load_env(&opts);
-    kc_nets_listen_signals();
 
     if (argc >= 2) {
         if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
@@ -179,8 +179,16 @@ int main(int argc, char **argv) {
         kc_nets_options_free(&opts);
         return 1;
     }
-    rc = kc_nets_send(host, port, proto, data, size);
+    if (kc_nets_open(&ctx, &opts) != KC_NETS_OK) {
+        fprintf(stderr, "nets: out of memory\n");
+        free(data);
+        kc_nets_options_free(&opts);
+        return 1;
+    }
+    kc_nets_listen_signals(ctx);
+    rc = kc_nets_send(ctx, host, port, proto, data, size);
     free(data);
+    kc_nets_close(ctx);
     kc_nets_options_free(&opts);
     if (rc != KC_NETS_OK) {
         fprintf(stderr, "nets: %s\n", kc_nets_strerror(rc));

@@ -174,10 +174,18 @@ kc_test_api() {
         printf '%s\n' '    if (argc != 3) return 1;'
         printf '%s\n' '    unsigned short port_tcp = (unsigned short)atoi(argv[1]);'
         printf '%s\n' '    unsigned short port_udp = (unsigned short)atoi(argv[2]);'
-        printf '%s\n' '    if (kc_nets_send(NULL, port_tcp, KC_NETS_TCP, "data", 4) != KC_NETS_EINVAL) return 2;'
-        printf '%s\n' '    if (kc_nets_send("127.0.0.1", port_tcp, 999, "data", 4) != KC_NETS_EINVAL) return 3;'
-        printf '%s\n' '    if (kc_nets_send("127.0.0.1", port_tcp, KC_NETS_TCP, "hello api tcp", 13) != KC_NETS_OK) return 4;'
-        printf '%s\n' '    if (kc_nets_send("127.0.0.1", port_udp, KC_NETS_UDP, "hello api udp", 13) != KC_NETS_OK) return 5;'
+        printf '%s\n' '    kc_nets_options_t opts = kc_nets_options_default();'
+        printf '%s\n' '    kc_nets_t *ctx = NULL;'
+        printf '%s\n' '    if (kc_nets_open(NULL, &opts) != KC_NETS_EINVAL) return 1;'
+        printf '%s\n' '    if (kc_nets_open(&ctx, NULL) != KC_NETS_EINVAL) return 1;'
+        printf '%s\n' '    if (kc_nets_open(&ctx, &opts) != KC_NETS_OK) return 2;'
+        printf '%s\n' '    if (kc_nets_send(NULL, "127.0.0.1", port_tcp, KC_NETS_TCP, "data", 4) != KC_NETS_EINVAL) return 3;'
+        printf '%s\n' '    if (kc_nets_send(ctx, NULL, port_tcp, KC_NETS_TCP, "data", 4) != KC_NETS_EINVAL) return 3;'
+        printf '%s\n' '    if (kc_nets_send(ctx, "127.0.0.1", port_tcp, 999, "data", 4) != KC_NETS_EINVAL) return 3;'
+        printf '%s\n' '    if (kc_nets_send(ctx, "127.0.0.1", port_tcp, KC_NETS_TCP, "hello api tcp", 13) != KC_NETS_OK) return 4;'
+        printf '%s\n' '    if (kc_nets_send(ctx, "127.0.0.1", port_udp, KC_NETS_UDP, "hello api udp", 13) != KC_NETS_OK) return 5;'
+        printf '%s\n' '    if (kc_nets_close(NULL) != KC_NETS_OK) return 6;'
+        printf '%s\n' '    if (kc_nets_close(ctx) != KC_NETS_OK) return 6;'
         printf '%s\n' '    return 0;'
         printf '%s\n' '}'
     } > "$TMPDIR/consumer.c"
@@ -222,6 +230,67 @@ kc_test_api() {
     return 0
 }
 
+# Tests multi-context stop isolation.
+# @return 0 on success, 1 on failure.
+kc_test_multictx_stop() {
+    LIB_PATH="$ROOT/bin/$(kc_test_arch)/$(kc_test_platform)/libnets.a"
+
+    port_tcp=$((30000 + ($$ % 10000)))
+    port_udp=$((40000 + ($$ % 10000)))
+
+    out="$TMPDIR/multictx.out"
+    rm -f "$out"
+
+    timeout 5s nc -l -p "$port_tcp" > "$out" 2>/dev/null &
+    pid_tcp=$!
+
+    sleep 0.2
+
+    {
+        printf '%s\n' '#include "nets.h"'
+        printf '%s\n' '#include <stdio.h>'
+        printf '%s\n' '#include <stdlib.h>'
+        printf '%s\n' '#include <signal.h>'
+        printf '%s\n' 'int main(void) {'
+        printf '%s\n' '    kc_nets_options_t opts = kc_nets_options_default();'
+        printf '%s\n' '    kc_nets_t *a = NULL, *b = NULL;'
+        printf '%s\n' '    if (kc_nets_open(&a, &opts) != KC_NETS_OK) return 1;'
+        printf '%s\n' '    if (kc_nets_open(&b, &opts) != KC_NETS_OK) return 2;'
+        printf '%s\n' '    if (kc_nets_stop(NULL) != KC_NETS_EINVAL) { kc_nets_close(a); kc_nets_close(b); return 3; }'
+        printf '%s\n' '    if (kc_nets_stop(a) != KC_NETS_OK) { kc_nets_close(a); kc_nets_close(b); return 4; }'
+        printf '%s\n' '    if (kc_nets_send(a, "127.0.0.1", '"$port_tcp"', KC_NETS_TCP, "fail", 4) != KC_NETS_ESTOP) { kc_nets_close(a); kc_nets_close(b); return 5; }'
+        printf '%s\n' '    if (kc_nets_send(b, "127.0.0.1", '"$port_tcp"', KC_NETS_TCP, "hello multi", 11) != KC_NETS_OK) { kc_nets_close(a); kc_nets_close(b); return 6; }'
+        printf '%s\n' '    if (kc_nets_close(a) != KC_NETS_OK) return 7;'
+        printf '%s\n' '    if (kc_nets_stop(b) != KC_NETS_OK) return 8;'
+        printf '%s\n' '    if (kc_nets_close(b) != KC_NETS_OK) return 9;'
+        printf '%s\n' '    return 0;'
+        printf '%s\n' '}'
+    } > "$TMPDIR/multictx.c"
+
+    if ! cc -I "$ROOT/src" "$TMPDIR/multictx.c" "$LIB_PATH" -o "$TMPDIR/multictx"; then
+        kill "$pid_tcp" 2>/dev/null
+        kc_test_fail "multi-context compile: expected multictx.c to compile, but compilation failed"
+        return 1
+    fi
+    kc_test_pass "multi-context: test program compiles successfully"
+
+    if ! "$TMPDIR/multictx"; then
+        kill "$pid_tcp" 2>/dev/null
+        kc_test_fail "multi-context execution: expected test program to return 0, got non-zero"
+        return 1
+    fi
+    kc_test_pass "multi-context stop: two contexts coexist, stop is isolated"
+
+    wait "$pid_tcp" || true
+    actual=$(cat "$out")
+    if [ "$actual" != "hello multi" ]; then
+        kc_test_fail "multi-context payload: expected 'hello multi', got '$actual'"
+        return 1
+    fi
+    kc_test_pass "multi-context: outstanding context delivers payload"
+    return 0
+}
+
 # Runs the full validation suite.
 # @return 0 on success, 1 on failure.
 kc_test_main() {
@@ -235,6 +304,7 @@ kc_test_main() {
     kc_test_tcp || failed=$((failed + 1))
     kc_test_udp || failed=$((failed + 1))
     kc_test_api || failed=$((failed + 1))
+    kc_test_multictx_stop || failed=$((failed + 1))
 
     return "$failed"
 }

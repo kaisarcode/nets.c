@@ -41,9 +41,17 @@ typedef struct {
     kc_nets_signal_callback_t cb;
 } kc_nets_signal_entry_t;
 
-static kc_nets_signal_entry_t *g_signal_handlers = NULL;
-static int g_n_signal_handlers = 0;
-static int g_signal_handlers_capacity = 0;
+static kc_nets_t **g_signal_ctx_list = NULL;
+static int g_signal_ctx_cap = 0;
+static int g_signal_ctx_count = 0;
+
+struct kc_nets {
+    kc_nets_options_t opts;
+    kc_nets_signal_entry_t *signal_handlers;
+    int n_signal_handlers;
+    int signal_handlers_capacity;
+    volatile sig_atomic_t stop_requested;
+};
 
 /**
  * Returns default-initialized options.
@@ -74,53 +82,103 @@ void kc_nets_options_free(kc_nets_options_t *opts) {
 }
 
 /**
+ * Initialize a new nets context.
+ * @param ctx_out Destination context pointer.
+ * @param opts    Configuration options.
+ * @return KC_NETS_OK on success, KC_NETS_EINVAL on failure.
+ */
+int kc_nets_open(kc_nets_t **ctx_out, kc_nets_options_t *opts) {
+    if (!ctx_out || !opts) return KC_NETS_EINVAL;
+    *ctx_out = NULL;
+    kc_nets_t *ctx = (kc_nets_t *)calloc(1, sizeof(kc_nets_t));
+    if (!ctx) return KC_NETS_EINVAL;
+    ctx->opts = *opts;
+    *ctx_out = ctx;
+    return KC_NETS_OK;
+}
+
+/**
+ * Release a nets context.
+ * @param ctx Context pointer.
+ * @return KC_NETS_OK.
+ */
+int kc_nets_close(kc_nets_t *ctx) {
+    int i;
+    if (!ctx) return KC_NETS_OK;
+    for (i = 0; i < g_signal_ctx_count; i++) {
+        if (g_signal_ctx_list[i] == ctx) {
+            g_signal_ctx_list[i] = g_signal_ctx_list[--g_signal_ctx_count];
+            break;
+        }
+    }
+    free(ctx->signal_handlers);
+    free(ctx);
+    return KC_NETS_OK;
+}
+
+/**
+ * Request stop for a specific nets context.
+ * @param ctx Context handle.
+ * @return KC_NETS_OK on success, KC_NETS_EINVAL on failure.
+ */
+int kc_nets_stop(kc_nets_t *ctx) {
+    if (!ctx) return KC_NETS_EINVAL;
+    ctx->stop_requested = 1;
+    return KC_NETS_OK;
+}
+
+/**
  * Registers a signal callback.
+ * @param ctx Context handle.
  * @param sig Signal number.
  * @param cb Callback function, or NULL to unregister.
  * @return KC_NETS_OK on success, or a negative error code.
  */
-int kc_nets_on_signal(int sig, kc_nets_signal_callback_t cb) {
+int kc_nets_on_signal(kc_nets_t *ctx, int sig, kc_nets_signal_callback_t cb) {
     int i;
-    for (i = 0; i < g_n_signal_handlers; i++) {
-        if (g_signal_handlers[i].sig == sig) {
+    if (!ctx) return KC_NETS_EINVAL;
+    for (i = 0; i < ctx->n_signal_handlers; i++) {
+        if (ctx->signal_handlers[i].sig == sig) {
             if (cb) {
-                g_signal_handlers[i].cb = cb;
+                ctx->signal_handlers[i].cb = cb;
             } else {
-                int tail = g_n_signal_handlers - i - 1;
+                int tail = ctx->n_signal_handlers - i - 1;
                 if (tail > 0) {
-                    memmove(&g_signal_handlers[i], &g_signal_handlers[i + 1],
+                    memmove(&ctx->signal_handlers[i], &ctx->signal_handlers[i + 1],
                             (size_t)tail * sizeof(kc_nets_signal_entry_t));
                 }
-                g_n_signal_handlers--;
+                ctx->n_signal_handlers--;
             }
             return KC_NETS_OK;
         }
     }
     if (!cb) return KC_NETS_OK;
-    if (g_n_signal_handlers >= g_signal_handlers_capacity) {
-        int new_cap = g_signal_handlers_capacity ? g_signal_handlers_capacity * 2 : 4;
-        kc_nets_signal_entry_t *p = (kc_nets_signal_entry_t *)realloc(g_signal_handlers,
+    if (ctx->n_signal_handlers >= ctx->signal_handlers_capacity) {
+        int new_cap = ctx->signal_handlers_capacity ? ctx->signal_handlers_capacity * 2 : 4;
+        kc_nets_signal_entry_t *p = (kc_nets_signal_entry_t *)realloc(ctx->signal_handlers,
             (size_t)new_cap * sizeof(kc_nets_signal_entry_t));
         if (!p) return KC_NETS_EINVAL;
-        g_signal_handlers = p;
-        g_signal_handlers_capacity = new_cap;
+        ctx->signal_handlers = p;
+        ctx->signal_handlers_capacity = new_cap;
     }
-    g_signal_handlers[g_n_signal_handlers].sig = sig;
-    g_signal_handlers[g_n_signal_handlers].cb = cb;
-    g_n_signal_handlers++;
+    ctx->signal_handlers[ctx->n_signal_handlers].sig = sig;
+    ctx->signal_handlers[ctx->n_signal_handlers].cb = cb;
+    ctx->n_signal_handlers++;
     return KC_NETS_OK;
 }
 
 /**
  * Raises a signal to registered callbacks.
+ * @param ctx Context handle.
  * @param sig Signal number.
  * @return KC_NETS_OK on success, or a negative error code.
  */
-int kc_nets_raise_signal(int sig) {
+int kc_nets_raise_signal(kc_nets_t *ctx, int sig) {
     int i;
-    for (i = 0; i < g_n_signal_handlers; i++) {
-        if (g_signal_handlers[i].sig == sig) {
-            g_signal_handlers[i].cb();
+    if (!ctx) return KC_NETS_EINVAL;
+    for (i = 0; i < ctx->n_signal_handlers; i++) {
+        if (ctx->signal_handlers[i].sig == sig) {
+            ctx->signal_handlers[i].cb(ctx);
             return KC_NETS_OK;
         }
     }
@@ -128,19 +186,41 @@ int kc_nets_raise_signal(int sig) {
 }
 
 /**
- * Listens for registered signals.
- * @return KC_NETS_OK on success, or a negative error code.
+ * Store context internally for use by the static signal listener.
+ * @param ctx Context handle.
+ * @return KC_NETS_OK on success, KC_NETS_EINVAL on failure.
  */
-int kc_nets_listen_signals(void) {
+int kc_nets_listen_signals(kc_nets_t *ctx) {
+    if (!ctx) return KC_NETS_EINVAL;
+    if (g_signal_ctx_count >= g_signal_ctx_cap) {
+        int new_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
+        kc_nets_t **new_list = (kc_nets_t **)realloc(g_signal_ctx_list,
+            (size_t)new_cap * sizeof(kc_nets_t *));
+        if (!new_list) return KC_NETS_EINVAL;
+        g_signal_ctx_list = new_list;
+        g_signal_ctx_cap = new_cap;
+    }
+    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
     return KC_NETS_OK;
 }
 
 /**
- * Listens for a specific signal.
- * @param sig_id Signal number.
- * @return KC_NETS_OK on success, or a negative error code.
+ * Wire a specific OS signal to the library listener.
+ * @param ctx    Context handle.
+ * @param sig_id OS signal ID.
+ * @return KC_NETS_OK on success, KC_NETS_EINVAL on failure.
  */
-int kc_nets_listen_signal(int sig_id) {
+int kc_nets_listen_signal(kc_nets_t *ctx, int sig_id) {
+    if (!ctx) return KC_NETS_EINVAL;
+    if (g_signal_ctx_count >= g_signal_ctx_cap) {
+        int new_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
+        kc_nets_t **new_list = (kc_nets_t **)realloc(g_signal_ctx_list,
+            (size_t)new_cap * sizeof(kc_nets_t *));
+        if (!new_list) return KC_NETS_EINVAL;
+        g_signal_ctx_list = new_list;
+        g_signal_ctx_cap = new_cap;
+    }
+    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
 #ifdef _WIN32
     (void)sig_id;
 #else
@@ -155,8 +235,12 @@ int kc_nets_listen_signal(int sig_id) {
  * @return None.
  */
 void kc_nets_signal_listener(int sig) {
-    if (kc_nets_raise_signal(sig) == 0)
-        return;
+    int i;
+    for (i = 0; i < g_signal_ctx_count; i++) {
+        if (g_signal_ctx_list[i] &&
+            kc_nets_raise_signal(g_signal_ctx_list[i], sig) == 0)
+            return;
+    }
     signal(sig, SIG_DFL);
     raise(sig);
 }
@@ -174,7 +258,7 @@ typedef int kc_nets_socket_t;
  * @param sock Socket handle.
  * @return None.
  */
-static void kc_nets_close(kc_nets_socket_t sock) {
+static void kc_nets_close_sock(kc_nets_socket_t sock) {
 #ifdef _WIN32
     closesocket(sock);
 #else
@@ -207,35 +291,40 @@ static void kc_nets_platform_cleanup(void) {
 
 /**
  * Sends all bytes over a connected TCP socket.
+ * @param ctx  Context handle.
  * @param sock Socket handle.
  * @param data Buffer pointer.
  * @param size Buffer size.
- * @return 0 on success, or -1 on failure.
+ * @return KC_NETS_OK on success, KC_NETS_ENET on error,
+ *         KC_NETS_ESTOP if stopped.
  */
-static int kc_nets_send_all(kc_nets_socket_t sock, const char *data, size_t size) {
+static int kc_nets_send_all(kc_nets_t *ctx, kc_nets_socket_t sock, const char *data, size_t size) {
     size_t sent = 0;
 
     while (sent < size) {
+        if (ctx && ctx->stop_requested) return KC_NETS_ESTOP;
 #ifdef _WIN32
         int n = send(sock, data + sent, (int)(size - sent), 0);
 #else
         ssize_t n = send(sock, data + sent, size - sent, 0);
 #endif
-        if (n <= 0) return -1;
+        if (n <= 0) return KC_NETS_ENET;
         sent += (size_t)n;
     }
-    return 0;
+    return KC_NETS_OK;
 }
 
 /**
  * Sends bytes through one resolved address.
- * @param ai Resolved address.
+ * @param ctx  Context handle.
+ * @param ai   Resolved address.
  * @param proto Protocol selector.
  * @param data Buffer pointer.
  * @param size Buffer size.
- * @return KC_NETS_OK on success, or KC_NETS_ENET.
+ * @return KC_NETS_OK on success, or a negative error code.
  */
 static int kc_nets_send_addr(
+kc_nets_t *ctx,
 const struct addrinfo *ai,
 int proto,
 const void *data,
@@ -243,6 +332,9 @@ size_t size
 ) {
     kc_nets_socket_t sock;
     int type = proto == KC_NETS_UDP ? SOCK_DGRAM : SOCK_STREAM;
+    int rc;
+
+    if (ctx && ctx->stop_requested) return KC_NETS_ESTOP;
 
     sock = socket(ai->ai_family, type, ai->ai_protocol);
     if (sock == KC_NETS_BAD_SOCKET) return KC_NETS_ENET;
@@ -253,24 +345,26 @@ size_t size
 #else
         ssize_t n = sendto(sock, data, size, 0, ai->ai_addr, ai->ai_addrlen);
 #endif
-        kc_nets_close(sock);
+        kc_nets_close_sock(sock);
         return n < 0 || (size_t)n != size ? KC_NETS_ENET : KC_NETS_OK;
     }
 
     if (connect(sock, ai->ai_addr, ai->ai_addrlen) != 0) {
-        kc_nets_close(sock);
+        kc_nets_close_sock(sock);
         return KC_NETS_ENET;
     }
-    if (kc_nets_send_all(sock, (const char *)data, size) != 0) {
-        kc_nets_close(sock);
-        return KC_NETS_ENET;
+    rc = kc_nets_send_all(ctx, sock, (const char *)data, size);
+    if (rc != KC_NETS_OK) {
+        kc_nets_close_sock(sock);
+        return rc;
     }
-    kc_nets_close(sock);
+    kc_nets_close_sock(sock);
     return KC_NETS_OK;
 }
 
 /**
  * Sends bytes to one network address.
+ * @param ctx  Context handle.
  * @param host Destination host or IP address.
  * @param port Destination port.
  * @param proto KC_NETS_TCP or KC_NETS_UDP.
@@ -279,6 +373,7 @@ size_t size
  * @return KC_NETS_OK on success, or a negative error code.
  */
 int kc_nets_send(
+kc_nets_t *ctx,
 const char *host,
 unsigned short port,
 int proto,
@@ -291,10 +386,11 @@ size_t size
     char port_text[16];
     int rc;
 
-    if (!host || !host[0] || !data || (proto != KC_NETS_TCP && proto != KC_NETS_UDP)) {
+    if (!ctx || !host || !host[0] || !data || (proto != KC_NETS_TCP && proto != KC_NETS_UDP)) {
         return KC_NETS_EINVAL;
     }
     if (kc_nets_platform_init() != 0) return KC_NETS_ENET;
+    if (ctx->stop_requested) return KC_NETS_ESTOP;
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
@@ -309,7 +405,7 @@ size_t size
 
     rc = KC_NETS_ENET;
     for (ai = res; ai; ai = ai->ai_next) {
-        rc = kc_nets_send_addr(ai, proto, data, size);
+        rc = kc_nets_send_addr(ctx, ai, proto, data, size);
         if (rc == KC_NETS_OK) break;
     }
 
@@ -328,6 +424,7 @@ const char *kc_nets_strerror(int code) {
         case KC_NETS_OK: return "ok";
         case KC_NETS_EINVAL: return "invalid argument";
         case KC_NETS_ENET: return "network error";
+        case KC_NETS_ESTOP: return "operation stopped";
         default: return "unknown error";
     }
 }
