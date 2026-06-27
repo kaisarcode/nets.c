@@ -1,6 +1,6 @@
 /**
- * test.c - libnets portable contract tests.
- * Summary: Validates exported libnets behavior through the public C API.
+ * test.c - libnets public API contract tests.
+ * Summary: Validates each exported nets function through one dedicated test case.
  *
  * Author:  KaisarCode
  * Website: https://kaisarcode.com
@@ -13,6 +13,7 @@
 
 #include "nets.h"
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,23 +26,22 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <pthread.h>
-#include <signal.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
 
-#define KC_TEST_HOST "127.0.0.1"
+#define TEST_HOST "127.0.0.1"
 
 #ifdef _WIN32
-typedef SOCKET kc_socket_t;
-typedef HANDLE kc_thread_t;
-#define KC_BAD_SOCKET INVALID_SOCKET
+typedef SOCKET test_socket_t;
+typedef HANDLE test_thread_t;
+#define TEST_BAD_SOCKET INVALID_SOCKET
 #else
-typedef int kc_socket_t;
-typedef pthread_t kc_thread_t;
-#define KC_BAD_SOCKET -1
+typedef int test_socket_t;
+typedef pthread_t test_thread_t;
+#define TEST_BAD_SOCKET -1
 #endif
 
 typedef struct {
@@ -50,12 +50,12 @@ typedef struct {
     char received[8192];
     size_t received_size;
     int result;
-    kc_thread_t thread;
-} kc_server_t;
+    test_thread_t thread;
+} test_server_t;
 
-static int signal_count = 0;
-static int signal_count_b = 0;
-static kc_nets_t *signal_ctx_seen = NULL;
+static int signal_count;
+static int signal_count_b;
+static kc_nets_t *signal_ctx_seen;
 
 /**
  * Stores one observed signal callback.
@@ -63,10 +63,8 @@ static kc_nets_t *signal_ctx_seen = NULL;
  * @return None.
  */
 static void count_signal(kc_nets_t *ctx) {
-    if (ctx != NULL) {
-        signal_count++;
-        signal_ctx_seen = ctx;
-    }
+    signal_count++;
+    signal_ctx_seen = ctx;
 }
 
 /**
@@ -75,10 +73,8 @@ static void count_signal(kc_nets_t *ctx) {
  * @return None.
  */
 static void count_signal_b(kc_nets_t *ctx) {
-    if (ctx != NULL) {
-        signal_count_b++;
-        signal_ctx_seen = ctx;
-    }
+    signal_count_b++;
+    signal_ctx_seen = ctx;
 }
 
 /**
@@ -142,7 +138,7 @@ static int socket_stop(void) {
  * @param fd Socket descriptor.
  * @return 0 on success.
  */
-static int socket_close(kc_socket_t fd) {
+static int socket_close(test_socket_t fd) {
 #ifdef _WIN32
     return closesocket(fd) == 0 ? 0 : 1;
 #else
@@ -156,9 +152,11 @@ static int socket_close(kc_socket_t fd) {
  * @param ms Timeout in milliseconds.
  * @return None.
  */
-static void socket_timeout(kc_socket_t fd, unsigned int ms) {
+static void socket_timeout(test_socket_t fd, unsigned int ms) {
 #ifdef _WIN32
-    DWORD tv = (DWORD)ms;
+    DWORD tv;
+
+    tv = (DWORD)ms;
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
 #else
     struct timeval tv;
@@ -174,7 +172,7 @@ static void socket_timeout(kc_socket_t fd, unsigned int ms) {
  * @param fd Socket descriptor.
  * @return None.
  */
-static void socket_reuse(kc_socket_t fd) {
+static void socket_reuse(test_socket_t fd) {
     int one;
 
     one = 1;
@@ -242,14 +240,14 @@ static DWORD WINAPI server_main(void *arg)
 static void *server_main(void *arg)
 #endif
 {
-    kc_server_t *server;
-    kc_socket_t fd;
+    test_server_t *server;
+    test_socket_t fd;
     struct sockaddr_in addr;
     int n;
 
-    server = (kc_server_t *)arg;
+    server = (test_server_t *)arg;
     fd = socket(AF_INET, server->proto == KC_NETS_UDP ? SOCK_DGRAM : SOCK_STREAM, 0);
-    if (fd == KC_BAD_SOCKET) {
+    if (fd == TEST_BAD_SOCKET) {
         server->result = 1;
 #ifdef _WIN32
         return 0;
@@ -273,7 +271,8 @@ static void *server_main(void *arg)
 #endif
     }
     if (server->proto == KC_NETS_TCP) {
-        kc_socket_t client;
+        test_socket_t client;
+
         if (listen(fd, 1) != 0) {
             socket_close(fd);
             server->result = 1;
@@ -284,7 +283,7 @@ static void *server_main(void *arg)
 #endif
         }
         client = accept(fd, NULL, NULL);
-        if (client == KC_BAD_SOCKET) {
+        if (client == TEST_BAD_SOCKET) {
             socket_close(fd);
             server->result = 1;
 #ifdef _WIN32
@@ -317,7 +316,7 @@ static void *server_main(void *arg)
  * @param port Listen port.
  * @return 0 on success, 1 on failure.
  */
-static int server_start(kc_server_t *server, int proto, unsigned short port) {
+static int server_start(test_server_t *server, int proto, unsigned short port) {
     memset(server, 0, sizeof(*server));
     server->proto = proto;
     server->port = port;
@@ -337,7 +336,7 @@ static int server_start(kc_server_t *server, int proto, unsigned short port) {
  * @param server Server state.
  * @return 0 on success, 1 on failure.
  */
-static int server_join(kc_server_t *server) {
+static int server_join(test_server_t *server) {
 #ifdef _WIN32
     if (WaitForSingleObject(server->thread, 10000U) != WAIT_OBJECT_0) return 1;
     CloseHandle(server->thread);
@@ -348,22 +347,306 @@ static int server_join(kc_server_t *server) {
 }
 
 /**
- * Verifies options, status strings, and version behavior.
+ * Tests kc_nets_options_default.
  * @return 0 on success, 1 on failure.
  */
-static int case_options_status(void) {
+static int case_kc_nets_options_default(void) {
     kc_nets_options_t opts;
+
+    opts = kc_nets_options_default();
+    return expect_int("default reserved is zero", 0, opts.reserved);
+}
+
+/**
+ * Tests kc_nets_options_load_env.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_options_load_env(void) {
+    kc_nets_options_t opts;
+
+    opts = kc_nets_options_default();
+    opts.reserved = 7;
+    kc_nets_options_load_env(&opts);
+    kc_nets_options_load_env(NULL);
+    return expect_int("load_env keeps reserved unchanged", 7, opts.reserved);
+}
+
+/**
+ * Tests kc_nets_options_free.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_options_free(void) {
+    kc_nets_options_t opts;
+
+    opts = kc_nets_options_default();
+    opts.reserved = 9;
+    kc_nets_options_free(&opts);
+    kc_nets_options_free(NULL);
+    return expect_int("options remain reusable after free", 9, opts.reserved);
+}
+
+/**
+ * Tests kc_nets_open.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_open(void) {
+    kc_nets_options_t opts;
+    kc_nets_t *ctx;
     int rc;
 
     opts = kc_nets_options_default();
+    ctx = NULL;
     rc = 0;
-    rc += expect_int("default reserved is zero", 0, opts.reserved);
-    opts.reserved = 7;
-    kc_nets_options_load_env(&opts);
-    rc += expect_int("load_env keeps reserved unchanged", 7, opts.reserved);
-    kc_nets_options_free(&opts);
-    kc_nets_options_load_env(NULL);
-    kc_nets_options_free(NULL);
+    rc += expect_int("open NULL out", KC_NETS_EINVAL, kc_nets_open(NULL, &opts));
+    rc += expect_int("open NULL opts", KC_NETS_EINVAL, kc_nets_open(&ctx, NULL));
+    rc += expect_int("open valid context", KC_NETS_OK, kc_nets_open(&ctx, &opts));
+    rc += expect_true("open sets context", ctx != NULL);
+    kc_nets_close(ctx);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_nets_close.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_close(void) {
+    kc_nets_options_t opts;
+    kc_nets_t *ctx;
+    int rc;
+
+    opts = kc_nets_options_default();
+    ctx = NULL;
+    rc = 0;
+    rc += expect_int("open before close", KC_NETS_OK, kc_nets_open(&ctx, &opts));
+    rc += expect_int("listen before close", KC_NETS_OK, kc_nets_listen_signals(ctx));
+    rc += expect_int("close NULL", KC_NETS_OK, kc_nets_close(NULL));
+    rc += expect_int("close context", KC_NETS_OK, kc_nets_close(ctx));
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_nets_stop.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_stop(void) {
+    kc_nets_options_t opts;
+    kc_nets_t *ctx;
+    int rc;
+
+    opts = kc_nets_options_default();
+    ctx = NULL;
+    rc = 0;
+    rc += expect_int("stop NULL", KC_NETS_EINVAL, kc_nets_stop(NULL));
+    rc += expect_int("open before stop", KC_NETS_OK, kc_nets_open(&ctx, &opts));
+    rc += expect_int("stop context", KC_NETS_OK, kc_nets_stop(ctx));
+    rc += expect_int("stop context repeated", KC_NETS_OK, kc_nets_stop(ctx));
+    kc_nets_close(ctx);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_nets_on_signal.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_on_signal(void) {
+    kc_nets_options_t opts;
+    kc_nets_t *ctx;
+    int rc;
+
+    opts = kc_nets_options_default();
+    ctx = NULL;
+    rc = 0;
+    signal_count = 0;
+    signal_count_b = 0;
+    rc += expect_int("on_signal NULL ctx", KC_NETS_EINVAL,
+        kc_nets_on_signal(NULL, 10, count_signal));
+    rc += expect_int("open for on_signal", KC_NETS_OK, kc_nets_open(&ctx, &opts));
+    rc += expect_int("register first handler", KC_NETS_OK,
+        kc_nets_on_signal(ctx, 10, count_signal));
+    rc += expect_int("replace handler", KC_NETS_OK,
+        kc_nets_on_signal(ctx, 10, count_signal_b));
+    rc += expect_int("raise replaced signal", KC_NETS_OK,
+        kc_nets_raise_signal(ctx, 10));
+    rc += expect_int("old handler not called", 0, signal_count);
+    rc += expect_int("new handler called", 1, signal_count_b);
+    rc += expect_int("remove handler", KC_NETS_OK,
+        kc_nets_on_signal(ctx, 10, NULL));
+    rc += expect_int("remove absent handler", KC_NETS_OK,
+        kc_nets_on_signal(ctx, 10, NULL));
+    kc_nets_close(ctx);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_nets_raise_signal.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_raise_signal(void) {
+    kc_nets_options_t opts;
+    kc_nets_t *ctx;
+    int rc;
+
+    opts = kc_nets_options_default();
+    ctx = NULL;
+    rc = 0;
+    signal_count = 0;
+    signal_ctx_seen = NULL;
+    rc += expect_int("raise NULL ctx", KC_NETS_EINVAL,
+        kc_nets_raise_signal(NULL, 10));
+    rc += expect_int("open for raise_signal", KC_NETS_OK, kc_nets_open(&ctx, &opts));
+    rc += expect_int("raise unhandled signal", KC_NETS_EINVAL,
+        kc_nets_raise_signal(ctx, 10));
+    rc += expect_int("register signal handler", KC_NETS_OK,
+        kc_nets_on_signal(ctx, 10, count_signal));
+    rc += expect_int("raise handled signal", KC_NETS_OK,
+        kc_nets_raise_signal(ctx, 10));
+    rc += expect_int("callback count", 1, signal_count);
+    rc += expect_true("callback saw context", signal_ctx_seen == ctx);
+    kc_nets_close(ctx);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_nets_listen_signals.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_listen_signals(void) {
+    kc_nets_options_t opts;
+    kc_nets_t *ctx;
+    int rc;
+
+    opts = kc_nets_options_default();
+    ctx = NULL;
+    rc = 0;
+    rc += expect_int("listen_signals NULL ctx", KC_NETS_EINVAL,
+        kc_nets_listen_signals(NULL));
+    rc += expect_int("open for listen_signals", KC_NETS_OK, kc_nets_open(&ctx, &opts));
+    rc += expect_int("listen signals context", KC_NETS_OK,
+        kc_nets_listen_signals(ctx));
+    kc_nets_close(ctx);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_nets_listen_signal.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_listen_signal(void) {
+    kc_nets_options_t opts;
+    kc_nets_t *ctx;
+    int rc;
+
+    opts = kc_nets_options_default();
+    ctx = NULL;
+    rc = 0;
+    rc += expect_int("listen_signal NULL ctx", KC_NETS_EINVAL,
+        kc_nets_listen_signal(NULL, SIGINT));
+    rc += expect_int("open for listen_signal", KC_NETS_OK, kc_nets_open(&ctx, &opts));
+    rc += expect_int("listen one signal", KC_NETS_OK,
+        kc_nets_listen_signal(ctx, SIGINT));
+    kc_nets_close(ctx);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_nets_signal_listener.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_signal_listener(void) {
+    kc_nets_options_t opts;
+    kc_nets_t *first;
+    kc_nets_t *second;
+    int rc;
+
+    opts = kc_nets_options_default();
+    first = NULL;
+    second = NULL;
+    rc = 0;
+    signal_count_b = 0;
+    signal_ctx_seen = NULL;
+    rc += expect_int("open first", KC_NETS_OK, kc_nets_open(&first, &opts));
+    rc += expect_int("open second", KC_NETS_OK, kc_nets_open(&second, &opts));
+    rc += expect_int("first listens globally", KC_NETS_OK,
+        kc_nets_listen_signals(first));
+    rc += expect_int("second listens globally", KC_NETS_OK,
+        kc_nets_listen_signals(second));
+    rc += expect_int("second handler", KC_NETS_OK,
+        kc_nets_on_signal(second, 77, count_signal_b));
+    kc_nets_signal_listener(77);
+    rc += expect_int("listener dispatched", 1, signal_count_b);
+    rc += expect_true("listener saw second ctx", signal_ctx_seen == second);
+    kc_nets_close(first);
+    kc_nets_close(second);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_nets_send.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_send(void) {
+    kc_nets_options_t opts;
+    kc_nets_t *ctx;
+    kc_nets_t *stopped;
+    test_server_t server;
+    unsigned short tcp_port;
+    unsigned short udp_port;
+    int rc;
+
+    opts = kc_nets_options_default();
+    ctx = NULL;
+    stopped = NULL;
+    tcp_port = (unsigned short)(port_base() + 1U);
+    udp_port = (unsigned short)(port_base() + 20U);
+    rc = 0;
+    rc += expect_int("send NULL ctx", KC_NETS_EINVAL,
+        kc_nets_send(NULL, TEST_HOST, 9, KC_NETS_TCP, "x", 1));
+    rc += expect_int("open for send", KC_NETS_OK, kc_nets_open(&ctx, &opts));
+    rc += expect_int("send NULL host", KC_NETS_EINVAL,
+        kc_nets_send(ctx, NULL, 9, KC_NETS_TCP, "x", 1));
+    rc += expect_int("send empty host", KC_NETS_EINVAL,
+        kc_nets_send(ctx, "", 9, KC_NETS_TCP, "x", 1));
+    rc += expect_int("send NULL data", KC_NETS_EINVAL,
+        kc_nets_send(ctx, TEST_HOST, 9, KC_NETS_TCP, NULL, 1));
+    rc += expect_int("send invalid proto", KC_NETS_EINVAL,
+        kc_nets_send(ctx, TEST_HOST, 9, 999, "x", 1));
+    rc += expect_int("send unresolvable host", KC_NETS_ENET,
+        kc_nets_send(ctx, "invalid.invalid", 9, KC_NETS_TCP, "x", 1));
+    rc += expect_int("open stopped context", KC_NETS_OK,
+        kc_nets_open(&stopped, &opts));
+    rc += expect_int("stop context", KC_NETS_OK, kc_nets_stop(stopped));
+    rc += expect_int("send stopped context", KC_NETS_ESTOP,
+        kc_nets_send(stopped, TEST_HOST, 9, KC_NETS_TCP, "x", 1));
+    kc_nets_close(stopped);
+
+    if (server_start(&server, KC_NETS_TCP, tcp_port) != 0) return 1;
+    rc += expect_int("tcp send", KC_NETS_OK,
+        kc_nets_send(ctx, TEST_HOST, tcp_port, KC_NETS_TCP, "hello tcp", 9));
+    rc += expect_int("tcp server join", 0, server_join(&server));
+    rc += expect_true("tcp payload size", server.received_size == 9U);
+    rc += expect_true("tcp payload bytes",
+        memcmp(server.received, "hello tcp", 9) == 0);
+
+    if (server_start(&server, KC_NETS_UDP, udp_port) != 0) return 1;
+    rc += expect_int("udp send", KC_NETS_OK,
+        kc_nets_send(ctx, TEST_HOST, udp_port, KC_NETS_UDP, "hello udp", 9));
+    rc += expect_int("udp server join", 0, server_join(&server));
+    rc += expect_true("udp payload size", server.received_size == 9U);
+    rc += expect_true("udp payload bytes",
+        memcmp(server.received, "hello udp", 9) == 0);
+
+    kc_nets_close(ctx);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_nets_strerror.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_strerror(void) {
+    int rc;
+
+    rc = 0;
     rc += expect_string("strerror OK", "ok", kc_nets_strerror(KC_NETS_OK));
     rc += expect_string("strerror EINVAL", "invalid argument",
         kc_nets_strerror(KC_NETS_EINVAL));
@@ -371,225 +654,18 @@ static int case_options_status(void) {
         kc_nets_strerror(KC_NETS_ENET));
     rc += expect_string("strerror ESTOP", "operation stopped",
         kc_nets_strerror(KC_NETS_ESTOP));
-    rc += expect_string("strerror unknown", "unknown error", kc_nets_strerror(999));
-    rc += expect_true("version returns non-zero build timestamp",
+    rc += expect_string("strerror unknown", "unknown error",
+        kc_nets_strerror(999));
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_nets_version.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_kc_nets_version(void) {
+    return expect_true("version returns non-zero build timestamp",
         kc_nets_version() != 0U);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Verifies context lifecycle, NULL guards, and stop behavior.
- * @return 0 on success, 1 on failure.
- */
-static int case_lifecycle(void) {
-    kc_nets_options_t opts;
-    kc_nets_t *ctx;
-    int rc;
-
-    opts = kc_nets_options_default();
-    ctx = NULL;
-    rc = 0;
-    rc += expect_int("open(NULL)", KC_NETS_EINVAL, kc_nets_open(NULL, &opts));
-    rc += expect_int("open(out, NULL)", KC_NETS_EINVAL, kc_nets_open(&ctx, NULL));
-    rc += expect_int("open(out, opts)", KC_NETS_OK, kc_nets_open(&ctx, &opts));
-    rc += expect_true("open sets context", ctx != NULL);
-    rc += expect_int("stop(NULL)", KC_NETS_EINVAL, kc_nets_stop(NULL));
-    rc += expect_int("stop(ctx)", KC_NETS_OK, kc_nets_stop(ctx));
-    rc += expect_int("stop(ctx) repeated", KC_NETS_OK, kc_nets_stop(ctx));
-    rc += expect_int("close(NULL)", KC_NETS_OK, kc_nets_close(NULL));
-    rc += expect_int("close(ctx)", KC_NETS_OK, kc_nets_close(ctx));
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Verifies signal registration, replacement, growth, and listener dispatch.
- * @return 0 on success, 1 on failure.
- */
-static int case_signal(void) {
-    kc_nets_options_t opts;
-    kc_nets_t *ctx;
-    kc_nets_t *second;
-    int rc;
-    int i;
-
-    opts = kc_nets_options_default();
-    ctx = NULL;
-    second = NULL;
-    rc = 0;
-    signal_count = 0;
-    signal_count_b = 0;
-    signal_ctx_seen = NULL;
-    rc += expect_int("on_signal(NULL)", KC_NETS_EINVAL,
-        kc_nets_on_signal(NULL, 10, count_signal));
-    rc += expect_int("raise_signal(NULL)", KC_NETS_EINVAL,
-        kc_nets_raise_signal(NULL, 10));
-    rc += expect_int("listen_signals(NULL)", KC_NETS_EINVAL,
-        kc_nets_listen_signals(NULL));
-    rc += expect_int("listen_signal(NULL)", KC_NETS_EINVAL,
-        kc_nets_listen_signal(NULL, 10));
-    rc += expect_int("open", KC_NETS_OK, kc_nets_open(&ctx, &opts));
-    rc += expect_int("raise unhandled", KC_NETS_EINVAL,
-        kc_nets_raise_signal(ctx, 10));
-    rc += expect_int("register handler", KC_NETS_OK,
-        kc_nets_on_signal(ctx, 10, count_signal));
-    rc += expect_int("raise handled", KC_NETS_OK,
-        kc_nets_raise_signal(ctx, 10));
-    rc += expect_int("callback count", 1, signal_count);
-    rc += expect_true("callback saw ctx", signal_ctx_seen == ctx);
-    rc += expect_int("replace handler", KC_NETS_OK,
-        kc_nets_on_signal(ctx, 10, count_signal_b));
-    signal_count = 0;
-    signal_count_b = 0;
-    rc += expect_int("raise replaced", KC_NETS_OK, kc_nets_raise_signal(ctx, 10));
-    rc += expect_int("old handler not called", 0, signal_count);
-    rc += expect_int("new handler called", 1, signal_count_b);
-    rc += expect_int("remove handler", KC_NETS_OK,
-        kc_nets_on_signal(ctx, 10, NULL));
-    rc += expect_int("raise removed", KC_NETS_EINVAL, kc_nets_raise_signal(ctx, 10));
-    rc += expect_int("remove absent handler", KC_NETS_OK,
-        kc_nets_on_signal(ctx, 10, NULL));
-    for (i = 0; i < 10; i++) {
-        rc += expect_int("register growth handler", KC_NETS_OK,
-            kc_nets_on_signal(ctx, 100 + i, count_signal));
-    }
-    signal_count = 0;
-    rc += expect_int("raise growth handler", KC_NETS_OK,
-        kc_nets_raise_signal(ctx, 109));
-    rc += expect_int("growth callback count", 1, signal_count);
-    rc += expect_int("listen signals", KC_NETS_OK, kc_nets_listen_signals(ctx));
-    rc += expect_int("listen one signal", KC_NETS_OK, kc_nets_listen_signal(ctx, 12));
-    rc += expect_int("open second", KC_NETS_OK, kc_nets_open(&second, &opts));
-    rc += expect_int("second listens", KC_NETS_OK, kc_nets_listen_signals(second));
-    rc += expect_int("second handler", KC_NETS_OK,
-        kc_nets_on_signal(second, 77, count_signal_b));
-    signal_count_b = 0;
-    signal_ctx_seen = NULL;
-    kc_nets_signal_listener(77);
-    rc += expect_int("listener dispatched", 1, signal_count_b);
-    rc += expect_true("listener saw second ctx", signal_ctx_seen == second);
-    kc_nets_close(ctx);
-    kc_nets_close(second);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Verifies send input guards and stopped-context behavior.
- * @return 0 on success, 1 on failure.
- */
-static int case_send_guards(void) {
-    kc_nets_options_t opts;
-    kc_nets_t *ctx;
-    int rc;
-
-    opts = kc_nets_options_default();
-    ctx = NULL;
-    rc = 0;
-    rc += expect_int("send(NULL ctx)", KC_NETS_EINVAL,
-        kc_nets_send(NULL, KC_TEST_HOST, 9, KC_NETS_TCP, "x", 1));
-    rc += expect_int("open", KC_NETS_OK, kc_nets_open(&ctx, &opts));
-    rc += expect_int("send(NULL host)", KC_NETS_EINVAL,
-        kc_nets_send(ctx, NULL, 9, KC_NETS_TCP, "x", 1));
-    rc += expect_int("send(empty host)", KC_NETS_EINVAL,
-        kc_nets_send(ctx, "", 9, KC_NETS_TCP, "x", 1));
-    rc += expect_int("send(NULL data)", KC_NETS_EINVAL,
-        kc_nets_send(ctx, KC_TEST_HOST, 9, KC_NETS_TCP, NULL, 1));
-    rc += expect_int("send(invalid proto)", KC_NETS_EINVAL,
-        kc_nets_send(ctx, KC_TEST_HOST, 9, 999, "x", 1));
-    rc += expect_int("send(unresolvable host)", KC_NETS_ENET,
-        kc_nets_send(ctx, "invalid.invalid", 9, KC_NETS_TCP, "x", 1));
-    rc += expect_int("stop", KC_NETS_OK, kc_nets_stop(ctx));
-    rc += expect_int("send stopped", KC_NETS_ESTOP,
-        kc_nets_send(ctx, KC_TEST_HOST, 9, KC_NETS_TCP, "x", 1));
-    kc_nets_close(ctx);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Verifies TCP payload delivery through kc_nets_send.
- * @return 0 on success, 1 on failure.
- */
-static int case_tcp_send(void) {
-    kc_nets_options_t opts;
-    kc_nets_t *ctx;
-    kc_server_t server;
-    unsigned short port;
-    int rc;
-
-    opts = kc_nets_options_default();
-    ctx = NULL;
-    port = (unsigned short)(port_base() + 1U);
-    rc = 0;
-    if (server_start(&server, KC_NETS_TCP, port) != 0) return 1;
-    rc += expect_int("open", KC_NETS_OK, kc_nets_open(&ctx, &opts));
-    rc += expect_int("tcp send", KC_NETS_OK,
-        kc_nets_send(ctx, KC_TEST_HOST, port, KC_NETS_TCP, "hello tcp", 9));
-    rc += expect_int("tcp server join", 0, server_join(&server));
-    rc += expect_true("tcp payload size", server.received_size == 9U);
-    rc += expect_true("tcp payload bytes",
-        memcmp(server.received, "hello tcp", 9) == 0);
-    kc_nets_close(ctx);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Verifies UDP payload delivery through kc_nets_send.
- * @return 0 on success, 1 on failure.
- */
-static int case_udp_send(void) {
-    kc_nets_options_t opts;
-    kc_nets_t *ctx;
-    kc_server_t server;
-    unsigned short port;
-    int rc;
-
-    opts = kc_nets_options_default();
-    ctx = NULL;
-    port = (unsigned short)(port_base() + 20U);
-    rc = 0;
-    if (server_start(&server, KC_NETS_UDP, port) != 0) return 1;
-    rc += expect_int("open", KC_NETS_OK, kc_nets_open(&ctx, &opts));
-    rc += expect_int("udp send", KC_NETS_OK,
-        kc_nets_send(ctx, KC_TEST_HOST, port, KC_NETS_UDP, "hello udp", 9));
-    rc += expect_int("udp server join", 0, server_join(&server));
-    rc += expect_true("udp payload size", server.received_size == 9U);
-    rc += expect_true("udp payload bytes",
-        memcmp(server.received, "hello udp", 9) == 0);
-    kc_nets_close(ctx);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Verifies stopped context isolation across two contexts.
- * @return 0 on success, 1 on failure.
- */
-static int case_multictx_stop(void) {
-    kc_nets_options_t opts;
-    kc_nets_t *stopped;
-    kc_nets_t *active;
-    kc_server_t server;
-    unsigned short port;
-    int rc;
-
-    opts = kc_nets_options_default();
-    stopped = NULL;
-    active = NULL;
-    port = (unsigned short)(port_base() + 40U);
-    rc = 0;
-    if (server_start(&server, KC_NETS_TCP, port) != 0) return 1;
-    rc += expect_int("open stopped", KC_NETS_OK, kc_nets_open(&stopped, &opts));
-    rc += expect_int("open active", KC_NETS_OK, kc_nets_open(&active, &opts));
-    rc += expect_int("stop stopped", KC_NETS_OK, kc_nets_stop(stopped));
-    rc += expect_int("stopped send returns ESTOP", KC_NETS_ESTOP,
-        kc_nets_send(stopped, KC_TEST_HOST, port, KC_NETS_TCP, "fail", 4));
-    rc += expect_int("active send succeeds", KC_NETS_OK,
-        kc_nets_send(active, KC_TEST_HOST, port, KC_NETS_TCP, "hello multi", 11));
-    rc += expect_int("server join", 0, server_join(&server));
-    rc += expect_true("multi payload size", server.received_size == 11U);
-    rc += expect_true("multi payload bytes",
-        memcmp(server.received, "hello multi", 11) == 0);
-    kc_nets_close(stopped);
-    kc_nets_close(active);
-    return rc == 0 ? 0 : 1;
 }
 
 /**
@@ -606,13 +682,20 @@ int main(int argc, char **argv) {
         return 2;
     }
     if (socket_start() != 0) return 1;
-    if (strcmp(argv[1], "options-status") == 0) rc = case_options_status();
-    else if (strcmp(argv[1], "lifecycle") == 0) rc = case_lifecycle();
-    else if (strcmp(argv[1], "signal") == 0) rc = case_signal();
-    else if (strcmp(argv[1], "send-guards") == 0) rc = case_send_guards();
-    else if (strcmp(argv[1], "tcp-send") == 0) rc = case_tcp_send();
-    else if (strcmp(argv[1], "udp-send") == 0) rc = case_udp_send();
-    else if (strcmp(argv[1], "multictx-stop") == 0) rc = case_multictx_stop();
+    if (strcmp(argv[1], "kc_nets_options_default") == 0) rc = case_kc_nets_options_default();
+    else if (strcmp(argv[1], "kc_nets_options_load_env") == 0) rc = case_kc_nets_options_load_env();
+    else if (strcmp(argv[1], "kc_nets_options_free") == 0) rc = case_kc_nets_options_free();
+    else if (strcmp(argv[1], "kc_nets_open") == 0) rc = case_kc_nets_open();
+    else if (strcmp(argv[1], "kc_nets_close") == 0) rc = case_kc_nets_close();
+    else if (strcmp(argv[1], "kc_nets_stop") == 0) rc = case_kc_nets_stop();
+    else if (strcmp(argv[1], "kc_nets_on_signal") == 0) rc = case_kc_nets_on_signal();
+    else if (strcmp(argv[1], "kc_nets_raise_signal") == 0) rc = case_kc_nets_raise_signal();
+    else if (strcmp(argv[1], "kc_nets_listen_signals") == 0) rc = case_kc_nets_listen_signals();
+    else if (strcmp(argv[1], "kc_nets_listen_signal") == 0) rc = case_kc_nets_listen_signal();
+    else if (strcmp(argv[1], "kc_nets_signal_listener") == 0) rc = case_kc_nets_signal_listener();
+    else if (strcmp(argv[1], "kc_nets_send") == 0) rc = case_kc_nets_send();
+    else if (strcmp(argv[1], "kc_nets_strerror") == 0) rc = case_kc_nets_strerror();
+    else if (strcmp(argv[1], "kc_nets_version") == 0) rc = case_kc_nets_version();
     else {
         fprintf(stderr, "unknown test case: %s\n", argv[1]);
         rc = 2;
