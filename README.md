@@ -48,17 +48,36 @@ echo 'hello' | nets 127.0.0.1:8080 --udp
 #include "nets.h"
 
 const char msg[] = "hello\n";
-kc_nets_send("127.0.0.1", 8080, KC_NETS_TCP, msg, sizeof(msg) - 1);
+kc_nets_options_t opts = kc_nets_options_default();
+kc_nets_t *ctx = NULL;
+
+kc_nets_open(&ctx, &opts);
+kc_nets_send(ctx, "127.0.0.1", 8080, KC_NETS_TCP, msg, sizeof(msg) - 1);
+kc_nets_close(ctx);
+kc_nets_options_free(&opts);
 ```
 
 ---
 
 ## Lifecycle
 
+- `kc_nets_options_default()` creates a default options struct.
+- `kc_nets_options_load_env()` overlays options from environment variables.
+- `kc_nets_options_free()` releases resources owned by options.
+- `kc_nets_open()` allocates a sender context.
 - `kc_nets_send()` opens a socket, sends the provided bytes, and closes the socket before returning.
 - TCP sends all bytes over one connection.
 - UDP sends the provided bytes as one datagram.
 - The caller owns the input buffer before and after the call.
+- `kc_nets_stop()` requests stop for one context.
+- `kc_nets_on_signal()` registers or removes application-defined signal handlers.
+- `kc_nets_raise_signal()` raises an application-defined signal on a context.
+- `kc_nets_listen_signals()` registers a context with the global signal listener.
+- `kc_nets_listen_signal()` wires an OS signal to the global listener.
+- `kc_nets_signal_listener()` dispatches a signal to registered contexts.
+- `kc_nets_strerror()` returns a static status message.
+- `kc_nets_version()` returns the build version.
+- `kc_nets_close()` releases the context.
 
 ---
 
@@ -69,6 +88,26 @@ Compiled artifacts are generated under `bin/{arch}/{platform}/` for the host arc
 ```bash
 make clean && make
 ```
+
+### Tests
+
+The portable test entry point is `make test`. Build project artifacts first, then run tests. Tests compile only test executables, link dynamically against the generated shared library, and run through CTest.
+
+```bash
+make
+make test
+```
+
+To run the common `test` target in Windows-through-Wine mode:
+
+```bash
+make x86_64/windows
+make test wine
+```
+
+The portable C test source is `src/test.c`. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
+
+Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test` or `make test wine`.
 
 ### Multiarch Builds
 

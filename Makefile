@@ -94,7 +94,7 @@ NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
 
 .DEFAULT_GOAL := native
 
-.PHONY: native all test clean \
+.PHONY: native all test wine clean \
 	x86_64/linux x86_64/windows \
 	i686/linux i686/windows \
 	aarch64/linux aarch64/android \
@@ -242,7 +242,72 @@ armv7/android:
 ## Utility
 
 test:
-	@sh test.sh
+	@if [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \
+		if ! command -v wine > /dev/null 2>&1; then \
+			echo "wine is required for make test wine" >&2; \
+			exit 1; \
+		fi; \
+		if ! command -v x86_64-w64-mingw32-gcc > /dev/null 2>&1; then \
+			echo "x86_64-w64-mingw32-gcc is required for make test wine" >&2; \
+			exit 1; \
+		fi; \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnets.dll" ]; then \
+			echo "missing Windows shared library: run make x86_64/windows first" >&2; \
+			exit 1; \
+		fi; \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnets.dll.a" ]; then \
+			echo "missing Windows import library: run make x86_64/windows first" >&2; \
+			exit 1; \
+		fi; \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/x86_64/windows/nets.exe" ]; then \
+			echo "missing Windows CLI: run make x86_64/windows first" >&2; \
+			exit 1; \
+		fi; \
+		if [ ! -f "$(BUILD_DIR)/test-wine/CMakeCache.txt" ]; then \
+			cmake -S . -B $(BUILD_DIR)/test-wine \
+				-DCMAKE_BUILD_TYPE=Release \
+				-DCMAKE_SYSTEM_NAME=Windows \
+				-DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
+				-DCMAKE_CROSSCOMPILING_EMULATOR=wine \
+				-DNETS_BUILD_TESTS=ON \
+				-DNETS_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnets.dll \
+				-DNETS_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libnets.dll.a \
+				-DNETS_TEST_CLI=$(CURDIR)/$(BIN_DIR)/x86_64/windows/nets.exe \
+				-G Ninja -Wno-dev > /dev/null; \
+		fi; \
+		cmake --build $(BUILD_DIR)/test-wine --target nets_contract_test; \
+		ctest --test-dir $(BUILD_DIR)/test-wine --output-on-failure; \
+	else \
+		if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
+			echo "Unsupported native target $(HOST_ARCH)/$(HOST_SYSTEM)" >&2; \
+			exit 1; \
+		fi; \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libnets.so" ]; then \
+			echo "missing native shared library: run make first" >&2; \
+			exit 1; \
+		fi; \
+		if [ ! -f "$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/nets" ]; then \
+			echo "missing native CLI: run make first" >&2; \
+			exit 1; \
+		fi; \
+		if [ ! -f "$(BUILD_DIR)/test/CMakeCache.txt" ]; then \
+			cmake -S . -B $(BUILD_DIR)/test \
+				-DCMAKE_BUILD_TYPE=Release \
+				-DNETS_BUILD_TESTS=ON \
+				-DNETS_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/libnets.so \
+				-DNETS_TEST_CLI=$(CURDIR)/$(BIN_DIR)/$(NATIVE_TARGET)/nets \
+				-G Ninja -Wno-dev > /dev/null; \
+		fi; \
+		cmake --build $(BUILD_DIR)/test --target nets_contract_test; \
+		ctest --test-dir $(BUILD_DIR)/test --output-on-failure; \
+	fi
+
+wine:
+	@if [ -z "$(filter test,$(MAKECMDGOALS))" ]; then \
+		echo "Use 'make test wine' to run tests through Wine." >&2; \
+		exit 1; \
+	fi
+	@:
 
 clean:
 	@rm -rf $(BUILD_DIR)
