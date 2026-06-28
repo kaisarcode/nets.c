@@ -18,6 +18,9 @@ endif()
 
 if(NOT MSVC)
     add_compile_options(-O3 -Wall -Wextra -Werror)
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        add_compile_options(-Wno-unused-command-line-argument)
+    endif()
     if(NETS_NATIVE)
         add_compile_options(-march=native)
     endif()
@@ -39,7 +42,7 @@ if(NOT NETS_TEST_EXTERNAL_ARTIFACTS)
 
     target_include_directories(nets PRIVATE src)
 
-    if(UNIX AND NOT ANDROID)
+    if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(nets pthread m)
     endif()
 
@@ -62,7 +65,7 @@ if(NOT NETS_TEST_EXTERNAL_ARTIFACTS)
 
     target_include_directories(nets_shared PRIVATE src)
 
-    if(UNIX AND NOT ANDROID)
+    if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(nets_shared pthread m)
     endif()
 
@@ -96,7 +99,7 @@ if(NETS_BUILD_TESTS)
     target_include_directories(nets_contract_test PRIVATE src)
     target_link_libraries(nets_contract_test PRIVATE ${NETS_TEST_SHARED_TARGET})
 
-    if(UNIX AND NOT ANDROID)
+    if(UNIX AND NOT ANDROID AND NOT APPLE)
         target_link_libraries(nets_contract_test PRIVATE pthread m)
     endif()
     if(WIN32)
