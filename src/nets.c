@@ -19,11 +19,12 @@
  * @return None.
  */
 static void kc_nets_help(const char *name) {
-    printf("Usage: %s <addr>[:port] [--tcp|--udp]\n", name);
+    printf("Usage: %s <addr>[:port] [--tcp|--udp] [--ctrl PATH]\n", name);
     printf("\n");
     printf("Options:\n");
     printf("  --tcp          Use TCP (default)\n");
     printf("  --udp          Use UDP\n");
+    printf("  --ctrl PATH    Open a Unix control socket for this one send\n");
     printf("  -h, --help     Show this help\n");
     printf("  -v, --version  Show version\n");
 }
@@ -168,25 +169,67 @@ int main(int argc, char **argv) {
             proto = KC_NETS_TCP;
         } else if (strcmp(argv[i], "--udp") == 0) {
             proto = KC_NETS_UDP;
+        } else if (strcmp(argv[i], "--ctrl") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "nets: missing value for --ctrl\n");
+                kc_nets_options_free(&opts);
+                return 1;
+            }
+            free(opts.ctrl_path);
+            opts.ctrl_path = strdup(argv[++i]);
+            if (!opts.ctrl_path) {
+                fprintf(stderr, "nets: out of memory\n");
+                kc_nets_options_free(&opts);
+                return 1;
+            }
         } else {
             fprintf(stderr, "nets: unknown option '%s'\n", argv[i]);
             kc_nets_options_free(&opts);
             return 1;
         }
     }
-    if (kc_nets_read_stdin(&data, &size) != 0) {
-        fprintf(stderr, "nets: failed to read stdin\n");
-        kc_nets_options_free(&opts);
-        return 1;
-    }
     if (kc_nets_open(&ctx, &opts) != KC_NETS_OK) {
         fprintf(stderr, "nets: out of memory\n");
-        free(data);
         kc_nets_options_free(&opts);
         return 1;
     }
     kc_nets_listen_signals(ctx);
-    rc = kc_nets_send(ctx, host, port, proto, data, size);
+    if (opts.ctrl_path) {
+        if (kc_nets_ctrl_open(ctx, opts.ctrl_path) != KC_NETS_OK) {
+            fprintf(stderr, "nets: failed to open control socket at %s\n", opts.ctrl_path);
+            kc_nets_close(ctx);
+            kc_nets_options_free(&opts);
+            return 1;
+        }
+    }
+    kc_nets_ctrl_poll(ctx);
+    if (kc_nets_stop_requested(ctx)) {
+        kc_nets_close(ctx);
+        kc_nets_options_free(&opts);
+        fprintf(stderr, "nets: %s\n", kc_nets_strerror(KC_NETS_ESTOP));
+        return 1;
+    }
+    if (kc_nets_read_stdin(&data, &size) != 0) {
+        fprintf(stderr, "nets: failed to read stdin\n");
+        kc_nets_close(ctx);
+        kc_nets_options_free(&opts);
+        return 1;
+    }
+    kc_nets_ctrl_poll(ctx);
+    if (kc_nets_stop_requested(ctx)) {
+        free(data);
+        kc_nets_close(ctx);
+        kc_nets_options_free(&opts);
+        fprintf(stderr, "nets: %s\n", kc_nets_strerror(KC_NETS_ESTOP));
+        return 1;
+    }
+    kc_nets_ctrl_poll(ctx);
+    if (kc_nets_stop_requested(ctx)) {
+        rc = KC_NETS_ESTOP;
+    } else {
+        rc = kc_nets_send(ctx, host, port, proto, data, size);
+    }
+    kc_nets_ctrl_poll(ctx);
     free(data);
     kc_nets_close(ctx);
     kc_nets_options_free(&opts);

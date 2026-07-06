@@ -28,10 +28,12 @@ typedef struct kc_nets kc_nets_t;
 #define KC_NETS_UDP       2
 
 typedef struct {
+    char *ctrl_path;
     int reserved;
 } kc_nets_options_t;
 
 typedef void (*kc_nets_signal_callback_t)(kc_nets_t *ctx);
+typedef int (*kc_nets_ctrl_callback_t)(kc_nets_t *ctx, int fd, int argc, char **argv);
 
 /**
  * Returns default-initialized options.
@@ -76,6 +78,13 @@ int kc_nets_close(kc_nets_t *ctx);
 int kc_nets_stop(kc_nets_t *ctx);
 
 /**
+ * Check whether a stop has been requested on the context.
+ * @param ctx Context pointer.
+ * @return 1 if stop was requested, 0 otherwise.
+ */
+int kc_nets_stop_requested(kc_nets_t *ctx);
+
+/**
  * Registers a signal callback.
  * @param ctx Context handle.
  * @param sig Signal number.
@@ -113,6 +122,45 @@ int kc_nets_listen_signal(kc_nets_t *ctx, int sig_id);
  * @return None.
  */
 void kc_nets_signal_listener(int sig);
+
+/**
+ * Register a control command handler.
+ * @param ctx Context handle.
+ * @param cmd Command name.
+ * @param cb Callback function, or NULL to remove.
+ * @return KC_NETS_OK on success, or a negative error code.
+ */
+int kc_nets_ctrl_on(kc_nets_t *ctx, const char *cmd, kc_nets_ctrl_callback_t cb);
+
+/**
+ * Remove a control command handler.
+ * @param ctx Context handle.
+ * @param cmd Command name.
+ * @return KC_NETS_OK on success, or a negative error code.
+ */
+int kc_nets_ctrl_off(kc_nets_t *ctx, const char *cmd);
+
+/**
+ * Open a Unix domain socket for control commands.
+ * @param ctx Context handle.
+ * @param path Socket path.
+ * @return KC_NETS_OK on success, or a negative error code.
+ */
+int kc_nets_ctrl_open(kc_nets_t *ctx, const char *path);
+
+/**
+ * Close the control socket and all active connections.
+ * @param ctx Context handle.
+ * @return KC_NETS_OK on success, or a negative error code.
+ */
+int kc_nets_ctrl_close(kc_nets_t *ctx);
+
+/**
+ * Non-blocking poll: accept connections, read and dispatch commands.
+ * @param ctx Context handle.
+ * @return Number of commands handled, or a negative error code.
+ */
+int kc_nets_ctrl_poll(kc_nets_t *ctx);
 
 /**
  * Sends bytes to one network address.
