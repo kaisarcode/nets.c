@@ -1,16 +1,16 @@
 # nets.c - Network Sender
 
-`nets.c` is a small C library and CLI for sending standard input to one TCP or UDP address.
+`nets.c` is a small C library and CLI for sending standard input to one TCP or UDP address and printing the response to standard output.
 
 ---
 
 ## CLI
 
-Send bytes from standard input to a network address.
+Send bytes from standard input to a network address and print the response to standard output.
 
 ### Examples
 
-Send to a TCP endpoint:
+Send to a TCP endpoint — stdin is sent, then the response is printed to stdout:
 
 ```bash
 echo 'hello' | nets 127.0.0.1:8080
@@ -77,8 +77,8 @@ kc_nets_options_free(&opts);
 - `GET` exposes only `ctrl_path` and `reserved`.
 - `SET` currently accepts only `ctrl_path`; unknown keys are rejected.
 - The CLI is still one-shot: the control socket exists only while one invocation is alive, around stdin read and one send attempt.
-- `kc_nets_send()` opens a socket, sends the provided bytes, and closes the socket before returning.
-- TCP sends all bytes over one connection.
+- `kc_nets_send()` opens a socket, sends the provided bytes, reads the response to stdout, and closes the socket before returning.
+- TCP sends all bytes over one connection, then reads the response until EOF.
 - UDP sends the provided bytes as one datagram.
 - The caller owns the input buffer before and after the call.
 - `kc_nets_stop()` requests stop for one context.
