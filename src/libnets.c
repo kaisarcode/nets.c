@@ -984,6 +984,16 @@ size_t size
         kc_nets_close_sock(sock);
         return rc;
     }
+#ifndef _WIN32
+    shutdown(sock, SHUT_WR);
+    for (;;) {
+        char buf[65536];
+        ssize_t n = read(sock, buf, sizeof(buf));
+        if (n <= 0) break;
+        if (fwrite(buf, 1, (size_t)n, stdout) != (size_t)n) break;
+    }
+    fflush(stdout);
+#endif
     kc_nets_close_sock(sock);
     return KC_NETS_OK;
 }
