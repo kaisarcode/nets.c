@@ -10,7 +10,7 @@ Send bytes from standard input to a network address and print the response to st
 
 ### Examples
 
-Send to a TCP endpoint — stdin is sent, then the response is printed to stdout:
+Send to a TCP endpoint - stdin is sent, then the response is printed to stdout:
 
 ```bash
 echo 'hello' | nets 127.0.0.1:8080
@@ -52,7 +52,7 @@ echo 'hello' | nets 127.0.0.1:8080 --ctrl /tmp/nets.sock
 ## Public API
 
 ```c
-#include "nets.h"
+#include "libnets.h"
 
 const char msg[] = "hello\n";
 kc_nets_options_t opts = kc_nets_options_default();

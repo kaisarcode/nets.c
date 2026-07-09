@@ -26,7 +26,7 @@
 #include <unistd.h>
 #endif
 
-#include "nets.h"
+#include "libnets.h"
 
 #include <stdio.h>
 #include <string.h>

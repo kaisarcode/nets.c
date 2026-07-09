@@ -11,7 +11,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
-#include "nets.h"
+#include "libnets.h"
 
 #include <signal.h>
 #include <stdio.h>
