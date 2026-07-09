@@ -19,7 +19,10 @@
  * @return None.
  */
 static void kc_nets_help(const char *name) {
-    printf("Usage: %s <addr>[:port] [--tcp|--udp] [--ctrl PATH]\n", name);
+    printf("Usage: %s <target> [--tcp|--udp] [--ctrl PATH]\n", name);
+    printf("\n");
+    printf("Target:\n");
+    printf("  host[:port] or http://, https://, tcp://, udp:// URL\n");
     printf("\n");
     printf("Options:\n");
     printf("  --tcp          Use TCP (default)\n");
@@ -80,41 +83,117 @@ static int kc_nets_read_stdin(char **out_data, size_t *out_size) {
 }
 
 /**
- * Parses address and optional port.
- * @param text Input address text.
+ * Parses a host, host:port, or URL target.
+ * URL schemes select transport defaults only;
+ * they do not add HTTP or TLS framing.
+ * Supported schemes are http, https, tcp, and udp.
+ * @param text Input target text.
  * @param host Output host buffer.
  * @param host_cap Output host capacity.
  * @param port Output port pointer.
+ * @param proto Output protocol pointer.
  * @return 0 on success, or 1 on failure.
  */
-static int kc_nets_parse_addr(
+static int kc_nets_parse_target(
 const char *text,
 char *host,
 size_t host_cap,
-unsigned short *port
+unsigned short *port,
+int *proto
 ) {
-    const char *colon;
+    const char *authority;
+    const char *authority_end;
+    const char *scheme_end;
+    const char *host_begin;
+    const char *host_end;
+    const char *port_begin;
     char *end;
     unsigned long value;
     size_t n;
 
-    if (!text || !text[0] || !host || host_cap == 0 || !port) return 1;
-    colon = strrchr(text, ':');
+    if (!text || !text[0] || !host || host_cap == 0 || !port || !proto) return 1;
+
+    authority = text;
+    authority_end = text + strlen(text);
     *port = 80;
-    if (!colon) {
-        n = strlen(text);
-        if (n == 0 || n >= host_cap) return 1;
-        memcpy(host, text, n + 1);
-        return 0;
+
+    scheme_end = strstr(text, "://");
+    if (scheme_end) {
+        n = (size_t)(scheme_end - text);
+        if (n == 4 && strncmp(text, "http", 4) == 0) {
+            *port = 80;
+            *proto = KC_NETS_TCP;
+        } else if (n == 5 && strncmp(text, "https", 5) == 0) {
+            *port = 443;
+            *proto = KC_NETS_TCP;
+        } else if (n == 3 && strncmp(text, "tcp", 3) == 0) {
+            *port = 80;
+            *proto = KC_NETS_TCP;
+        } else if (n == 3 && strncmp(text, "udp", 3) == 0) {
+            *port = 80;
+            *proto = KC_NETS_UDP;
+        } else {
+            return 1;
+        }
+        authority = scheme_end + 3;
+        authority_end = authority + strcspn(authority, "/?#");
     }
-    if (colon == text || colon[1] == '\0') return 1;
-    n = (size_t)(colon - text);
+
+    if (authority == authority_end) return 1;
+    if (memchr(authority, '@', (size_t)(authority_end - authority)) != NULL) return 1;
+
+    port_begin = NULL;
+    if (*authority == '[') {
+        host_begin = authority + 1;
+        host_end = memchr(host_begin, ']', (size_t)(authority_end - host_begin));
+        if (!host_end || host_end == host_begin) return 1;
+        if (host_end + 1 < authority_end) {
+            if (host_end[1] != ':') return 1;
+            port_begin = host_end + 2;
+            if (port_begin == authority_end) return 1;
+        } else if (host_end + 1 != authority_end) {
+            return 1;
+        }
+    } else {
+        const char *colon;
+        const char *pcur;
+        int colon_count;
+
+        colon = NULL;
+        colon_count = 0;
+        for (pcur = authority; pcur < authority_end; pcur++) {
+            if (*pcur == ':') {
+                colon = pcur;
+                colon_count++;
+            }
+        }
+        if (colon_count > 1) return 1;
+        host_begin = authority;
+        host_end = colon ? colon : authority_end;
+        if (colon) {
+            port_begin = colon + 1;
+            if (port_begin == authority_end) return 1;
+        }
+    }
+
+    n = (size_t)(host_end - host_begin);
     if (n == 0 || n >= host_cap) return 1;
-    memcpy(host, text, n);
+    memcpy(host, host_begin, n);
     host[n] = '\0';
-    value = strtoul(colon + 1, &end, 10);
-    if (*end != '\0' || value == 0 || value > 65535) return 1;
-    *port = (unsigned short)value;
+
+    if (port_begin) {
+        char port_text[6];
+        size_t port_len;
+
+        port_len = (size_t)(authority_end - port_begin);
+        if (port_len == 0 || port_len >= sizeof(port_text)) return 1;
+        memcpy(port_text, port_begin, port_len);
+        port_text[port_len] = '\0';
+        value = strtoul(port_text, &end, 10);
+        if (*end != '\0' || value == 0 || value > 65535) return 1;
+        *port = (unsigned short)value;
+    }
+
     return 0;
 }
 
@@ -159,8 +238,8 @@ int main(int argc, char **argv) {
         kc_nets_options_free(&opts);
         return 1;
     }
-    if (kc_nets_parse_addr(argv[1], host, sizeof(host), &port) != 0) {
-        fprintf(stderr, "nets: invalid address\n");
+    if (kc_nets_parse_target(argv[1], host, sizeof(host), &port, &proto) != 0) {
+        fprintf(stderr, "nets: invalid target\n");
         kc_nets_options_free(&opts);
         return 1;
     }

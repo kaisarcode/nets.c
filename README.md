@@ -1,6 +1,6 @@
 # nets.c - Network Sender
 
-`nets.c` is a small C library and CLI for sending standard input to one TCP or UDP address and printing the response to standard output.
+`nets.c` is a small C library and CLI for sending standard input to one TCP or UDP target and printing the response to standard output.
 
 ---
 
@@ -22,6 +22,14 @@ Send to port 80 by default:
 echo 'hello' | nets 127.0.0.1
 ```
 
+Pass a URL-shaped target:
+
+```bash
+nets https://example.com <<< 'payload'
+```
+
+URL schemes select transport defaults only: `http://` uses TCP port `80`, `https://` uses TCP port `443`, `tcp://` uses TCP, and `udp://` uses UDP. `nets` remains a raw byte sender; `https://` does **not** add TLS encryption or HTTP framing.
+
 Send a UDP datagram:
 
 ```bash
@@ -40,7 +48,7 @@ echo 'hello' | nets 127.0.0.1:8080 --ctrl /tmp/nets.sock
 
 | Parameter | Description |
 | :--- | :--- |
-| `<addr>[:port]` | Destination host or IP address. Port defaults to `80`. |
+| `<target>` | Host, `host:port`, or `http://`, `https://`, `tcp://`, `udp://` URL-shaped target. |
 | `--tcp` | Use TCP. This is the default. |
 | `--udp` | Use UDP. |
 | `--ctrl PATH` | Open a Unix domain control socket for the current CLI run. |
