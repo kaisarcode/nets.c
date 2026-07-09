@@ -29,6 +29,14 @@ else()
     add_compile_options(/O2 /W3 /WX)
 endif()
 
+find_path(OPENSSL_INCLUDE_DIR NAMES openssl/ssl.h)
+find_library(OPENSSL_SSL_LIBRARY NAMES ssl libssl)
+find_library(OPENSSL_CRYPTO_LIBRARY NAMES crypto libcrypto)
+mark_as_advanced(OPENSSL_INCLUDE_DIR OPENSSL_SSL_LIBRARY OPENSSL_CRYPTO_LIBRARY)
+if(OPENSSL_INCLUDE_DIR AND OPENSSL_SSL_LIBRARY AND OPENSSL_CRYPTO_LIBRARY)
+    add_definitions(-DKC_NETS_OPENSSL)
+endif()
+
 set_source_files_properties(src/libnets.c PROPERTIES
     COMPILE_DEFINITIONS KC_NETS_BUILD_VERSION=${NETS_BUILD_VERSION}
 )
@@ -48,6 +56,11 @@ if(NOT NETS_TEST_EXTERNAL_ARTIFACTS)
 
     if(WIN32)
         target_link_libraries(nets ws2_32)
+    endif()
+
+    if(OPENSSL_INCLUDE_DIR AND OPENSSL_SSL_LIBRARY AND OPENSSL_CRYPTO_LIBRARY)
+        target_include_directories(nets PRIVATE ${OPENSSL_INCLUDE_DIR})
+        target_link_libraries(nets ${OPENSSL_SSL_LIBRARY} ${OPENSSL_CRYPTO_LIBRARY})
     endif()
 
     # Static library
@@ -71,6 +84,11 @@ if(NOT NETS_TEST_EXTERNAL_ARTIFACTS)
 
     if(WIN32)
         target_link_libraries(nets_shared ws2_32)
+    endif()
+
+    if(OPENSSL_INCLUDE_DIR AND OPENSSL_SSL_LIBRARY AND OPENSSL_CRYPTO_LIBRARY)
+        target_include_directories(nets_shared PRIVATE ${OPENSSL_INCLUDE_DIR})
+        target_link_libraries(nets_shared ${OPENSSL_SSL_LIBRARY} ${OPENSSL_CRYPTO_LIBRARY})
     endif()
 endif()
 

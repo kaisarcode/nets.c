@@ -181,6 +181,11 @@ Windows (MSVC or MinGW):
 macOS / iOS:
 - No additional system libraries required.
 
+### Optional Dependencies
+
+- `OpenSSL` - required for TLS over TCP (`--tls`, `https://` URLs).
+    If missing, TLS features are unavailable but TCP and UDP work normally.
+
 ### Optional Cross-Compilation SDKs
 
 Required only for multiarch builds:

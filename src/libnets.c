@@ -35,6 +35,11 @@
 #include <stddef.h>
 #include <signal.h>
 
+#ifdef KC_NETS_OPENSSL
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#endif
+
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
 #  define WIN32_LEAN_AND_MEAN
@@ -313,6 +318,22 @@ void kc_nets_signal_listener(int sig) {
     signal(sig, SIG_DFL);
     raise(sig);
 }
+
+#ifdef KC_NETS_OPENSSL
+
+/**
+ * Returns a lazily-initialized shared SSL context.
+ * @return SSL_CTX pointer, or NULL on failure.
+ */
+static SSL_CTX *kc_nets_ssl_ctx(void) {
+    static SSL_CTX *ctx = NULL;
+    if (!ctx) {
+        OPENSSL_init_ssl(OPENSSL_INIT_LOAD_SSL_STRINGS, NULL);
+        ctx = SSL_CTX_new(TLS_client_method());
+    }
+    return ctx;
+}
+#endif
 
 #ifndef _WIN32
 
@@ -947,6 +968,7 @@ static int kc_nets_send_all(kc_nets_t *ctx, kc_nets_socket_t sock, const char *d
  * @param proto Protocol selector.
  * @param data Buffer pointer.
  * @param size Buffer size.
+ * @param host Original hostname (for TLS SNI).
  * @return KC_NETS_OK on success, or a negative error code.
  */
 static int kc_nets_send_addr(
@@ -954,11 +976,15 @@ kc_nets_t *ctx,
 const struct addrinfo *ai,
 int proto,
 const void *data,
-size_t size
+size_t size,
+const char *host
 ) {
     kc_nets_socket_t sock;
     int type = proto == KC_NETS_UDP ? SOCK_DGRAM : SOCK_STREAM;
     int rc;
+#ifndef KC_NETS_OPENSSL
+    (void)host;
+#endif
 
     if (ctx && ctx->stop_requested) return KC_NETS_ESTOP;
 
@@ -979,6 +1005,51 @@ size_t size
         kc_nets_close_sock(sock);
         return KC_NETS_ENET;
     }
+
+#ifdef KC_NETS_OPENSSL
+    if (proto == KC_NETS_TLS) {
+        SSL *ssl;
+        size_t sent;
+        int n;
+        char buf[65536];
+
+        ssl = SSL_new(kc_nets_ssl_ctx());
+        if (!ssl) { kc_nets_close_sock(sock); return KC_NETS_ENET; }
+        SSL_set_fd(ssl, (int)sock);
+        SSL_set_tlsext_host_name(ssl, host);
+        if (SSL_connect(ssl) != 1) {
+            SSL_free(ssl);
+            kc_nets_close_sock(sock);
+            return KC_NETS_ENET;
+        }
+
+        sent = 0;
+        while (sent < size) {
+            if (ctx && ctx->stop_requested) {
+                SSL_free(ssl);
+                kc_nets_close_sock(sock);
+                return KC_NETS_ESTOP;
+            }
+            n = SSL_write(ssl, (const char *)data + sent, (int)(size - sent));
+            if (n <= 0) {
+                SSL_free(ssl);
+                kc_nets_close_sock(sock);
+                return KC_NETS_ENET;
+            }
+            sent += (size_t)n;
+        }
+
+        SSL_shutdown(ssl);
+        while ((n = SSL_read(ssl, buf, sizeof(buf))) > 0) {
+            if (fwrite(buf, 1, (size_t)n, stdout) != (size_t)n) break;
+        }
+        fflush(stdout);
+        SSL_free(ssl);
+        kc_nets_close_sock(sock);
+        return KC_NETS_OK;
+    }
+#endif
+
     rc = kc_nets_send_all(ctx, sock, (const char *)data, size);
     if (rc != KC_NETS_OK) {
         kc_nets_close_sock(sock);
@@ -1022,9 +1093,13 @@ size_t size
     char port_text[16];
     int rc;
 
-    if (!ctx || !host || !host[0] || !data || (proto != KC_NETS_TCP && proto != KC_NETS_UDP)) {
+    if (!ctx || !host || !host[0] || !data ||
+        (proto != KC_NETS_TCP && proto != KC_NETS_UDP && proto != KC_NETS_TLS)) {
         return KC_NETS_EINVAL;
     }
+#ifndef KC_NETS_OPENSSL
+    if (proto == KC_NETS_TLS) return KC_NETS_ENET;
+#endif
     if (kc_nets_platform_init() != 0) return KC_NETS_ENET;
     if (ctx->stop_requested) return KC_NETS_ESTOP;
 
@@ -1041,7 +1116,7 @@ size_t size
 
     rc = KC_NETS_ENET;
     for (ai = res; ai; ai = ai->ai_next) {
-        rc = kc_nets_send_addr(ctx, ai, proto, data, size);
+        rc = kc_nets_send_addr(ctx, ai, proto, data, size, host);
         if (rc == KC_NETS_OK) break;
     }
 
@@ -1075,4 +1150,16 @@ const char *kc_nets_strerror(int code) {
  */
 uint64_t kc_nets_version(void) {
     return (uint64_t)KC_NETS_BUILD_VERSION;
+}
+
+/**
+ * Check if TLS support is compiled in.
+ * @return 1 if TLS is available, 0 otherwise.
+ */
+int kc_nets_tls_available(void) {
+#ifdef KC_NETS_OPENSSL
+    return 1;
+#else
+    return 0;
+#endif
 }

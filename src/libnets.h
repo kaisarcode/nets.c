@@ -26,6 +26,7 @@ typedef struct kc_nets kc_nets_t;
 
 #define KC_NETS_TCP       1
 #define KC_NETS_UDP       2
+#define KC_NETS_TLS       3
 
 typedef struct {
     char *ctrl_path;
@@ -193,6 +194,12 @@ const char *kc_nets_strerror(int code);
  * @return Unix timestamp for the current build.
  */
 uint64_t kc_nets_version(void);
+
+/**
+ * Check if TLS support is compiled in.
+ * @return 1 if TLS is available, 0 otherwise.
+ */
+int kc_nets_tls_available(void);
 
 #ifdef __cplusplus
 }

@@ -27,6 +27,7 @@ static void kc_nets_help(const char *name) {
     printf("Options:\n");
     printf("  --tcp          Use TCP (default)\n");
     printf("  --udp          Use UDP\n");
+    printf("  --tls          Use TLS over TCP\n");
     printf("  --ctrl PATH    Open a Unix control socket for this one send\n");
     printf("  -h, --help     Show this help\n");
     printf("  -v, --version  Show version\n");
@@ -125,7 +126,7 @@ int *proto
             *proto = KC_NETS_TCP;
         } else if (n == 5 && strncmp(text, "https", 5) == 0) {
             *port = 443;
-            *proto = KC_NETS_TCP;
+            *proto = KC_NETS_TLS;
         } else if (n == 3 && strncmp(text, "tcp", 3) == 0) {
             *port = 80;
             *proto = KC_NETS_TCP;
@@ -248,6 +249,14 @@ int main(int argc, char **argv) {
             proto = KC_NETS_TCP;
         } else if (strcmp(argv[i], "--udp") == 0) {
             proto = KC_NETS_UDP;
+        } else if (strcmp(argv[i], "--tls") == 0) {
+            if (!kc_nets_tls_available()) {
+                fprintf(stderr, "nets: TLS not available "
+                    "(compiled without OpenSSL)\n");
+                kc_nets_options_free(&opts);
+                return 1;
+            }
+            proto = KC_NETS_TLS;
         } else if (strcmp(argv[i], "--ctrl") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "nets: missing value for --ctrl\n");
