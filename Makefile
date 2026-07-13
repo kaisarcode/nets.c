@@ -12,6 +12,7 @@ NDK_TOOLCHAIN := $(NDK_DIR)/build/cmake/android.toolchain.cmake
 XDG_DATA_HOME ?= $(HOME)/.local/share
 OSXCROSS_ROOT ?= $(XDG_DATA_HOME)/osxcross/target
 MACOSX_DEPLOYMENT_TARGET ?= 11.0
+MACOSX_SDK ?= $(shell ls -d "$(OSXCROSS_ROOT)"/SDK/MacOSX*.sdk 2>/dev/null | sort -V | tail -n 1)
 IOS_DEPLOYMENT_TARGET ?= 13.0
 IPHONEOS_SDK ?= $(shell ls -d "$(OSXCROSS_ROOT)"/SDK/iPhoneOS*.sdk 2>/dev/null | sort -V | tail -n 1)
 IPHONESIMULATOR_SDK ?= $(shell ls -d "$(OSXCROSS_ROOT)"/SDK/iPhoneSimulator*.sdk 2>/dev/null | sort -V | tail -n 1)
@@ -228,7 +229,7 @@ i686/windows:
 
 define macos_target
 	@mkdir -p $(BIN_DIR)/$(1)/macos
-	@if [ ! -x $(2) ]; then \
+	@if ! $(2) --version > /dev/null 2>&1; then \
 		echo "Missing macOS cross-compiler wrapper: $(2)" >&2; \
 		echo "Set OSXCROSS_ROOT to your osxcross target dir and ensure the wrappers are built." >&2; \
 		exit 1; \
@@ -236,8 +237,13 @@ define macos_target
 	@export OSXCROSS_HOST=$(1)-apple-darwin25.1 && \
 	export OSXCROSS_TARGET_DIR=$(OSXCROSS_ROOT) && \
 	export OSXCROSS_TARGET=darwin25.1 && \
-	export OSXCROSS_SDK=$(OSXCROSS_ROOT)/SDK/MacOSX26.1.sdk && \
+	export OSXCROSS_SDK=$(MACOSX_SDK) && \
+	export LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" && \
 	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
+	cache=$(BUILD_DIR)/$(1)-macos/CMakeCache.txt && \
+	if [ -f "$$cache" ] && ! grep -q '^CMAKE_C_COMPILER:.*=$(2)$$' "$$cache"; then \
+		rm -f "$$cache" $(BUILD_DIR)/$(1)-macos/build.ninja && rm -rf $(BUILD_DIR)/$(1)-macos/CMakeFiles; \
+	fi && \
 	if [ ! -f $(BUILD_DIR)/$(1)-macos/build.ninja ]; then \
 		cmake -S . -B $(BUILD_DIR)/$(1)-macos \
 			-DCMAKE_BUILD_TYPE=Release \
@@ -267,7 +273,7 @@ aarch64/macos:
 
 define ios_target
 	@mkdir -p $(BIN_DIR)/$(1)/$(2)
-	@if [ ! -x $(3) ]; then \
+	@if ! $(3) --version > /dev/null 2>&1; then \
 		echo "Missing iOS cross-compiler wrapper: $(3)" >&2; \
 		echo "Set OSXCROSS_ROOT to your osxcross target dir and ensure the wrappers are built." >&2; \
 		exit 1; \
@@ -280,8 +286,13 @@ define ios_target
 	@export OSXCROSS_HOST=$(1)-apple-darwin25.1 && \
 	export OSXCROSS_TARGET_DIR=$(OSXCROSS_ROOT) && \
 	export OSXCROSS_TARGET=darwin25.1 && \
-	export OSXCROSS_SDK=$(OSXCROSS_ROOT)/SDK/MacOSX26.1.sdk && \
+	export OSXCROSS_SDK=$(MACOSX_SDK) && \
+	export LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" && \
 	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
+	cache=$(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt && \
+	if [ -f "$$cache" ] && ! grep -q '^CMAKE_C_COMPILER:.*=$(3)$$' "$$cache"; then \
+		rm -f "$$cache" $(BUILD_DIR)/$(1)-$(2)/build.ninja && rm -rf $(BUILD_DIR)/$(1)-$(2)/CMakeFiles; \
+	fi && \
 	if [ ! -f $(BUILD_DIR)/$(1)-$(2)/build.ninja ]; then \
 		cmake -S . -B $(BUILD_DIR)/$(1)-$(2) \
 			-DCMAKE_BUILD_TYPE=Release \
