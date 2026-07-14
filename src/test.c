@@ -29,7 +29,6 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <sys/un.h>
 #include <unistd.h>
 #endif
 
@@ -225,94 +224,6 @@ static int expect_string(const char *name, const char *expected, const char *act
     return 0;
 }
 
-/**
- * Sets one environment variable for the current process.
- * @param name Variable name.
- * @param value Variable value.
- * @return 0 on success, 1 on failure.
- */
-static int test_env_set(const char *name, const char *value) {
-#ifdef _WIN32
-    return _putenv_s(name, value) == 0 ? 0 : 1;
-#else
-    return setenv(name, value, 1) == 0 ? 0 : 1;
-#endif
-}
-
-/**
- * Clears one environment variable for the current process.
- * @param name Variable name.
- * @return 0 on success, 1 on failure.
- */
-static int test_env_unset(const char *name) {
-#ifdef _WIN32
-    return _putenv_s(name, "") == 0 ? 0 : 1;
-#else
-    return unsetenv(name) == 0 ? 0 : 1;
-#endif
-}
-
-#ifndef _WIN32
-
-/**
- * Connects one client to a Unix control socket.
- * @param sock_path Socket path.
- * @return Connected file descriptor, or -1 on failure.
- */
-static int ctrl_connect(const char *sock_path) {
-    struct sockaddr_un addr;
-    int client_fd;
-
-    client_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (client_fd < 0) {
-        return -1;
-    }
-
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, sock_path, sizeof(addr.sun_path) - 1);
-    if (connect(client_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(client_fd);
-        return -1;
-    }
-
-    return client_fd;
-}
-
-/**
- * Exchanges one line with the control socket.
- * @param ctx Context handle.
- * @param client_fd Connected client descriptor.
- * @param request Request line.
- * @param response Response buffer.
- * @param response_cap Response buffer capacity.
- * @return Response byte count, or -1 on failure.
- */
-static ssize_t ctrl_roundtrip(
-kc_nets_t *ctx,
-int client_fd,
-const char *request,
-char *response,
-size_t response_cap
-) {
-    size_t request_len;
-    ssize_t n;
-
-    request_len = strlen(request);
-    kc_nets_ctrl_poll(ctx);
-    if (write(client_fd, request, request_len) != (ssize_t)request_len) {
-        return -1;
-    }
-    kc_nets_ctrl_poll(ctx);
-    n = read(client_fd, response, response_cap - 1);
-    if (n >= 0) {
-        response[n] = '\0';
-    }
-    return n;
-}
-
-#endif
-
 #ifdef _WIN32
 /**
  * Runs one TCP or UDP receiver thread.
@@ -446,7 +357,6 @@ static int case_kc_nets_options_default(void) {
     opts = kc_nets_options_default();
     rc = 0;
     rc += expect_int("default reserved is zero", 0, opts.reserved);
-    rc += expect_true("default ctrl_path is NULL", opts.ctrl_path == NULL);
     return rc == 0 ? 0 : 1;
 }
 
@@ -461,12 +371,9 @@ static int case_kc_nets_options_load_env(void) {
     opts = kc_nets_options_default();
     opts.reserved = 7;
     rc = 0;
-    rc += expect_int("set KC_NETS_CTRL", 0, test_env_set("KC_NETS_CTRL", "/tmp/nets_env.sock"));
     kc_nets_options_load_env(&opts);
     kc_nets_options_load_env(NULL);
     rc += expect_int("load_env keeps reserved unchanged", 7, opts.reserved);
-    rc += expect_string("load_env reads ctrl path", "/tmp/nets_env.sock", opts.ctrl_path);
-    rc += expect_int("unset KC_NETS_CTRL", 0, test_env_unset("KC_NETS_CTRL"));
     kc_nets_options_free(&opts);
     return rc == 0 ? 0 : 1;
 }
@@ -480,13 +387,11 @@ static int case_kc_nets_options_free(void) {
     int rc;
 
     opts = kc_nets_options_default();
-    opts.ctrl_path = strdup("/tmp/nets_free.sock");
     opts.reserved = 9;
     rc = 0;
     kc_nets_options_free(&opts);
     kc_nets_options_free(NULL);
     rc += expect_int("options remain reusable after free", 9, opts.reserved);
-    rc += expect_true("options free clears ctrl_path", opts.ctrl_path == NULL);
     return rc == 0 ? 0 : 1;
 }
 
@@ -745,199 +650,6 @@ static int case_kc_nets_send(void) {
 }
 
 /**
- * Tests kc_nets control HELP command.
- * @return 0 on success, 1 on failure.
- */
-static int case_ctrl_help(void) {
-#ifndef _WIN32
-    kc_nets_options_t opts;
-    kc_nets_t *ctx;
-    char sock_path[128];
-    int client_fd;
-    char buf[256];
-    ssize_t n;
-    int rc;
-
-    snprintf(sock_path, sizeof(sock_path), "/tmp/nets_ctrl_help_%d.sock", (int)getpid());
-    unlink(sock_path);
-    opts = kc_nets_options_default();
-    ctx = NULL;
-    rc = 0;
-    if (kc_nets_open(&ctx, &opts) != KC_NETS_OK) {
-        return 1;
-    }
-    kc_nets_options_free(&opts);
-    if (kc_nets_ctrl_open(ctx, sock_path) != KC_NETS_OK) {
-        kc_nets_close(ctx);
-        unlink(sock_path);
-        return 1;
-    }
-    client_fd = ctrl_connect(sock_path);
-    if (client_fd < 0) {
-        kc_nets_close(ctx);
-        unlink(sock_path);
-        return 1;
-    }
-    n = ctrl_roundtrip(ctx, client_fd, "HELP\n", buf, sizeof(buf));
-    rc += expect_true("ctrl help returns OK", n > 0 && strncmp(buf, "OK ", 3) == 0);
-    rc += expect_true("ctrl help lists HELP", n > 0 && strstr(buf, "HELP") != NULL);
-    close(client_fd);
-    kc_nets_close(ctx);
-    unlink(sock_path);
-    return rc == 0 ? 0 : 1;
-#else
-    return expect_true("ctrl test is skipped on Windows", 1);
-#endif
-}
-
-/**
- * Tests kc_nets control STOP command.
- * @return 0 on success, 1 on failure.
- */
-static int case_ctrl_stop(void) {
-#ifndef _WIN32
-    kc_nets_options_t opts;
-    kc_nets_t *ctx;
-    char sock_path[128];
-    int client_fd;
-    char buf[256];
-    ssize_t n;
-    int rc;
-
-    snprintf(sock_path, sizeof(sock_path), "/tmp/nets_ctrl_stop_%d.sock", (int)getpid());
-    unlink(sock_path);
-    opts = kc_nets_options_default();
-    ctx = NULL;
-    rc = 0;
-    if (kc_nets_open(&ctx, &opts) != KC_NETS_OK) {
-        return 1;
-    }
-    kc_nets_options_free(&opts);
-    if (kc_nets_ctrl_open(ctx, sock_path) != KC_NETS_OK) {
-        kc_nets_close(ctx);
-        unlink(sock_path);
-        return 1;
-    }
-    client_fd = ctrl_connect(sock_path);
-    if (client_fd < 0) {
-        kc_nets_close(ctx);
-        unlink(sock_path);
-        return 1;
-    }
-    n = ctrl_roundtrip(ctx, client_fd, "STOP\n", buf, sizeof(buf));
-    rc += expect_true("ctrl stop returns OK", n > 0 && strcmp(buf, "OK\n") == 0);
-    rc += expect_int("ctrl stop sets flag", 1, kc_nets_stop_requested(ctx));
-    close(client_fd);
-    kc_nets_close(ctx);
-    unlink(sock_path);
-    return rc == 0 ? 0 : 1;
-#else
-    return expect_true("ctrl test is skipped on Windows", 1);
-#endif
-}
-
-/**
- * Tests kc_nets control GET command.
- * @return 0 on success, 1 on failure.
- */
-static int case_ctrl_get(void) {
-#ifndef _WIN32
-    kc_nets_options_t opts;
-    kc_nets_t *ctx;
-    char sock_path[128];
-    int client_fd;
-    char buf[256];
-    ssize_t n;
-    int rc;
-
-    snprintf(sock_path, sizeof(sock_path), "/tmp/nets_ctrl_get_%d.sock", (int)getpid());
-    unlink(sock_path);
-    opts = kc_nets_options_default();
-    opts.ctrl_path = strdup(sock_path);
-    opts.reserved = 17;
-    ctx = NULL;
-    rc = 0;
-    if (kc_nets_open(&ctx, &opts) != KC_NETS_OK) {
-        kc_nets_options_free(&opts);
-        return 1;
-    }
-    kc_nets_options_free(&opts);
-    if (kc_nets_ctrl_open(ctx, sock_path) != KC_NETS_OK) {
-        kc_nets_close(ctx);
-        unlink(sock_path);
-        return 1;
-    }
-    client_fd = ctrl_connect(sock_path);
-    if (client_fd < 0) {
-        kc_nets_close(ctx);
-        unlink(sock_path);
-        return 1;
-    }
-    n = ctrl_roundtrip(ctx, client_fd, "GET ctrl_path\n", buf, sizeof(buf));
-    rc += expect_true("ctrl get ctrl_path returns path", n > 0 && strstr(buf, sock_path) != NULL);
-    n = ctrl_roundtrip(ctx, client_fd, "GET reserved\n", buf, sizeof(buf));
-    rc += expect_true("ctrl get reserved returns value", n > 0 && strcmp(buf, "OK 17\n") == 0);
-    close(client_fd);
-    kc_nets_close(ctx);
-    unlink(sock_path);
-    return rc == 0 ? 0 : 1;
-#else
-    return expect_true("ctrl test is skipped on Windows", 1);
-#endif
-}
-
-/**
- * Tests kc_nets control SET command.
- * @return 0 on success, 1 on failure.
- */
-static int case_ctrl_set(void) {
-#ifndef _WIN32
-    kc_nets_options_t opts;
-    kc_nets_t *ctx;
-    char sock_path[128];
-    int client_fd;
-    char buf[256];
-    ssize_t n;
-    int rc;
-
-    snprintf(sock_path, sizeof(sock_path), "/tmp/nets_ctrl_set_%d.sock", (int)getpid());
-    unlink(sock_path);
-    opts = kc_nets_options_default();
-    ctx = NULL;
-    rc = 0;
-    if (kc_nets_open(&ctx, &opts) != KC_NETS_OK) {
-        return 1;
-    }
-    kc_nets_options_free(&opts);
-    if (kc_nets_ctrl_open(ctx, sock_path) != KC_NETS_OK) {
-        kc_nets_close(ctx);
-        unlink(sock_path);
-        return 1;
-    }
-    client_fd = ctrl_connect(sock_path);
-    if (client_fd < 0) {
-        kc_nets_close(ctx);
-        unlink(sock_path);
-        return 1;
-    }
-    n = ctrl_roundtrip(ctx, client_fd, "SET ctrl_path /tmp/nets_new.sock\n", buf, sizeof(buf));
-    rc += expect_true("ctrl set ctrl_path returns OK", n > 0 && strcmp(buf, "OK\n") == 0);
-    n = ctrl_roundtrip(ctx, client_fd, "GET ctrl_path\n", buf, sizeof(buf));
-    rc += expect_true("ctrl set ctrl_path updates value",
-        n > 0 && strcmp(buf, "OK /tmp/nets_new.sock\n") == 0);
-    n = ctrl_roundtrip(ctx, client_fd, "SET reserved 3\n", buf, sizeof(buf));
-    rc += expect_true("ctrl set unknown key returns error",
-        n > 0 && strcmp(buf, "ERR unknown key\n") == 0);
-    close(client_fd);
-    kc_nets_close(ctx);
-    unlink(sock_path);
-    return rc == 0 ? 0 : 1;
-#else
-    return expect_true("ctrl test is skipped on Windows", 1);
-#endif
-}
-
-/**
  * Tests kc_nets_strerror.
  * @return 0 on success, 1 on failure.
  */
@@ -994,10 +706,6 @@ int main(int argc, char **argv) {
     else if (strcmp(argv[1], "kc_nets_send") == 0) rc = case_kc_nets_send();
     else if (strcmp(argv[1], "kc_nets_strerror") == 0) rc = case_kc_nets_strerror();
     else if (strcmp(argv[1], "kc_nets_version") == 0) rc = case_kc_nets_version();
-    else if (strcmp(argv[1], "ctrl-help") == 0) rc = case_ctrl_help();
-    else if (strcmp(argv[1], "ctrl-stop") == 0) rc = case_ctrl_stop();
-    else if (strcmp(argv[1], "ctrl-get") == 0) rc = case_ctrl_get();
-    else if (strcmp(argv[1], "ctrl-set") == 0) rc = case_ctrl_set();
     else {
         fprintf(stderr, "unknown test case: %s\n", argv[1]);
         rc = 2;

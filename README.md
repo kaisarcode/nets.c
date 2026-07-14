@@ -36,12 +36,6 @@ Send a UDP datagram:
 echo 'hello' | nets 127.0.0.1:8080 --udp
 ```
 
-Open a temporary control socket while one CLI send runs:
-
-```bash
-echo 'hello' | nets 127.0.0.1:8080 --ctrl /tmp/nets.sock
-```
-
 ---
 
 ### Parameters
@@ -51,7 +45,6 @@ echo 'hello' | nets 127.0.0.1:8080 --ctrl /tmp/nets.sock
 | `<target>` | Host, `host:port`, or `http://`, `https://`, `tcp://`, `udp://` URL-shaped target. |
 | `--tcp` | Use TCP. This is the default. |
 | `--udp` | Use UDP. |
-| `--ctrl PATH` | Open a Unix domain control socket for the current CLI run. |
 | `-h`, `--help` | Show help and usage. |
 | `-v`, `--version` | Show version. |
 
@@ -77,14 +70,9 @@ kc_nets_options_free(&opts);
 ## Lifecycle
 
 - `kc_nets_options_default()` creates a default options struct.
-- `kc_nets_options_load_env()` overlays options from environment variables such as `KC_NETS_CTRL`.
+- `kc_nets_options_load_env()` overlays supported options from environment variables.
 - `kc_nets_options_free()` releases resources owned by options.
 - `kc_nets_open()` allocates a sender context.
-- `kc_nets_ctrl_open()` opens a Unix domain control socket on POSIX systems.
-- The built-in control commands are `HELP`, `STOP`, `GET`, and `SET`.
-- `GET` exposes only `ctrl_path` and `reserved`.
-- `SET` currently accepts only `ctrl_path`; unknown keys are rejected.
-- The CLI is still one-shot: the control socket exists only while one invocation is alive, around stdin read and one send attempt.
 - `kc_nets_send()` opens a socket, sends the provided bytes, reads the response to stdout, and closes the socket before returning.
 - TCP sends all bytes over one connection, then reads the response until EOF.
 - UDP sends the provided bytes as one datagram.
