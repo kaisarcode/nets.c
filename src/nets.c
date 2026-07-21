@@ -267,7 +267,6 @@ int main(int argc, char **argv) {
         kc_nets_options_free(&opts);
         return 1;
     }
-    kc_nets_listen_signals(ctx);
     if (kc_nets_stop_requested(ctx)) {
         kc_nets_close(ctx);
         kc_nets_options_free(&opts);

@@ -20,7 +20,7 @@ and releases all per-call network state before returning.
 The four source files have fixed responsibilities:
 
 - `src/nets.c` owns CLI parsing and stdin buffering;
-- `src/libnets.c` owns reusable transport, TLS, stop, and signal behavior;
+- `src/libnets.c` owns reusable transport, TLS, and stop behavior;
 - `src/libnets.h` defines the public contract;
 - `src/test.c` contains all tests.
 
@@ -82,21 +82,20 @@ cookies, redirects, credentials, or application semantics.
 
 ## Context and Ownership
 
-An opened context owns copied options, signal-handler storage, and a stop flag.
-The caller owns the input buffer throughout `kc_nets_send()`. Host and payload
-pointers are borrowed for the duration of the call and are not retained.
+An opened context owns copied options and a stop flag. The caller owns the input
+buffer throughout `kc_nets_send()`. Host and payload pointers are borrowed for
+the duration of the call and are not retained.
 
 stdout is borrowed process state. The library writes response bytes and flushes
 it but never closes it.
 
-Closing a context removes it from global signal dispatch and releases its owned
-memory. There is no persistent connection or endpoint state.
+Closing a context releases its owned memory. There is no persistent connection
+or endpoint state.
 
-## Stop and Signal Behavior
+## Stop Behavior
 
 A stop request sets context-local state. Sends check it before network work and
-during plain TCP or TLS write loops. Signal callbacks are application-defined and
-may set that state.
+during plain TCP or TLS write loops.
 
 Stop is cooperative, not a universal cancellation mechanism. Current blocking
 DNS resolution, connect calls, response reads, and some transport operations may

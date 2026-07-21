@@ -53,30 +53,6 @@ typedef struct {
     test_thread_t thread;
 } test_server_t;
 
-static int signal_count;
-static int signal_count_b;
-static kc_nets_t *signal_ctx_seen;
-
-/**
- * Stores one observed signal callback.
- * @param ctx Context passed by the library.
- * @return None.
- */
-static void count_signal(kc_nets_t *ctx) {
-    signal_count++;
-    signal_ctx_seen = ctx;
-}
-
-/**
- * Stores one observed secondary signal callback.
- * @param ctx Context passed by the library.
- * @return None.
- */
-static void count_signal_b(kc_nets_t *ctx) {
-    signal_count_b++;
-    signal_ctx_seen = ctx;
-}
-
 /**
  * Returns a process-specific base port.
  * @return Port base.
@@ -428,7 +404,6 @@ static int case_kc_nets_close(void) {
     ctx = NULL;
     rc = 0;
     rc += expect_int("open before close", KC_NETS_OK, kc_nets_open(&ctx, &opts));
-    rc += expect_int("listen before close", KC_NETS_OK, kc_nets_listen_signals(ctx));
     rc += expect_int("close NULL", KC_NETS_OK, kc_nets_close(NULL));
     rc += expect_int("close context", KC_NETS_OK, kc_nets_close(ctx));
     return rc == 0 ? 0 : 1;
@@ -451,142 +426,6 @@ static int case_kc_nets_stop(void) {
     rc += expect_int("stop context", KC_NETS_OK, kc_nets_stop(ctx));
     rc += expect_int("stop context repeated", KC_NETS_OK, kc_nets_stop(ctx));
     kc_nets_close(ctx);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_nets_on_signal.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_nets_on_signal(void) {
-    kc_nets_options_t opts;
-    kc_nets_t *ctx;
-    int rc;
-
-    opts = kc_nets_options_default();
-    ctx = NULL;
-    rc = 0;
-    signal_count = 0;
-    signal_count_b = 0;
-    rc += expect_int("on_signal NULL ctx", KC_NETS_EINVAL,
-        kc_nets_on_signal(NULL, 10, count_signal));
-    rc += expect_int("open for on_signal", KC_NETS_OK, kc_nets_open(&ctx, &opts));
-    rc += expect_int("register first handler", KC_NETS_OK,
-        kc_nets_on_signal(ctx, 10, count_signal));
-    rc += expect_int("replace handler", KC_NETS_OK,
-        kc_nets_on_signal(ctx, 10, count_signal_b));
-    rc += expect_int("raise replaced signal", KC_NETS_OK,
-        kc_nets_raise_signal(ctx, 10));
-    rc += expect_int("old handler not called", 0, signal_count);
-    rc += expect_int("new handler called", 1, signal_count_b);
-    rc += expect_int("remove handler", KC_NETS_OK,
-        kc_nets_on_signal(ctx, 10, NULL));
-    rc += expect_int("remove absent handler", KC_NETS_OK,
-        kc_nets_on_signal(ctx, 10, NULL));
-    kc_nets_close(ctx);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_nets_raise_signal.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_nets_raise_signal(void) {
-    kc_nets_options_t opts;
-    kc_nets_t *ctx;
-    int rc;
-
-    opts = kc_nets_options_default();
-    ctx = NULL;
-    rc = 0;
-    signal_count = 0;
-    signal_ctx_seen = NULL;
-    rc += expect_int("raise NULL ctx", KC_NETS_EINVAL,
-        kc_nets_raise_signal(NULL, 10));
-    rc += expect_int("open for raise_signal", KC_NETS_OK, kc_nets_open(&ctx, &opts));
-    rc += expect_int("raise unhandled signal", KC_NETS_EINVAL,
-        kc_nets_raise_signal(ctx, 10));
-    rc += expect_int("register signal handler", KC_NETS_OK,
-        kc_nets_on_signal(ctx, 10, count_signal));
-    rc += expect_int("raise handled signal", KC_NETS_OK,
-        kc_nets_raise_signal(ctx, 10));
-    rc += expect_int("callback count", 1, signal_count);
-    rc += expect_true("callback saw context", signal_ctx_seen == ctx);
-    kc_nets_close(ctx);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_nets_listen_signals.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_nets_listen_signals(void) {
-    kc_nets_options_t opts;
-    kc_nets_t *ctx;
-    int rc;
-
-    opts = kc_nets_options_default();
-    ctx = NULL;
-    rc = 0;
-    rc += expect_int("listen_signals NULL ctx", KC_NETS_EINVAL,
-        kc_nets_listen_signals(NULL));
-    rc += expect_int("open for listen_signals", KC_NETS_OK, kc_nets_open(&ctx, &opts));
-    rc += expect_int("listen signals context", KC_NETS_OK,
-        kc_nets_listen_signals(ctx));
-    kc_nets_close(ctx);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_nets_listen_signal.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_nets_listen_signal(void) {
-    kc_nets_options_t opts;
-    kc_nets_t *ctx;
-    int rc;
-
-    opts = kc_nets_options_default();
-    ctx = NULL;
-    rc = 0;
-    rc += expect_int("listen_signal NULL ctx", KC_NETS_EINVAL,
-        kc_nets_listen_signal(NULL, SIGINT));
-    rc += expect_int("open for listen_signal", KC_NETS_OK, kc_nets_open(&ctx, &opts));
-    rc += expect_int("listen one signal", KC_NETS_OK,
-        kc_nets_listen_signal(ctx, SIGINT));
-    kc_nets_close(ctx);
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_nets_signal_listener.
- * @return 0 on success, 1 on failure.
- */
-static int case_kc_nets_signal_listener(void) {
-    kc_nets_options_t opts;
-    kc_nets_t *first;
-    kc_nets_t *second;
-    int rc;
-
-    opts = kc_nets_options_default();
-    first = NULL;
-    second = NULL;
-    rc = 0;
-    signal_count_b = 0;
-    signal_ctx_seen = NULL;
-    rc += expect_int("open first", KC_NETS_OK, kc_nets_open(&first, &opts));
-    rc += expect_int("open second", KC_NETS_OK, kc_nets_open(&second, &opts));
-    rc += expect_int("first listens globally", KC_NETS_OK,
-        kc_nets_listen_signals(first));
-    rc += expect_int("second listens globally", KC_NETS_OK,
-        kc_nets_listen_signals(second));
-    rc += expect_int("second handler", KC_NETS_OK,
-        kc_nets_on_signal(second, 77, count_signal_b));
-    kc_nets_signal_listener(77);
-    rc += expect_int("listener dispatched", 1, signal_count_b);
-    rc += expect_true("listener saw second ctx", signal_ctx_seen == second);
-    kc_nets_close(first);
-    kc_nets_close(second);
     return rc == 0 ? 0 : 1;
 }
 
@@ -698,11 +537,6 @@ int main(int argc, char **argv) {
     else if (strcmp(argv[1], "kc_nets_open") == 0) rc = case_kc_nets_open();
     else if (strcmp(argv[1], "kc_nets_close") == 0) rc = case_kc_nets_close();
     else if (strcmp(argv[1], "kc_nets_stop") == 0) rc = case_kc_nets_stop();
-    else if (strcmp(argv[1], "kc_nets_on_signal") == 0) rc = case_kc_nets_on_signal();
-    else if (strcmp(argv[1], "kc_nets_raise_signal") == 0) rc = case_kc_nets_raise_signal();
-    else if (strcmp(argv[1], "kc_nets_listen_signals") == 0) rc = case_kc_nets_listen_signals();
-    else if (strcmp(argv[1], "kc_nets_listen_signal") == 0) rc = case_kc_nets_listen_signal();
-    else if (strcmp(argv[1], "kc_nets_signal_listener") == 0) rc = case_kc_nets_signal_listener();
     else if (strcmp(argv[1], "kc_nets_send") == 0) rc = case_kc_nets_send();
     else if (strcmp(argv[1], "kc_nets_strerror") == 0) rc = case_kc_nets_strerror();
     else if (strcmp(argv[1], "kc_nets_version") == 0) rc = case_kc_nets_version();

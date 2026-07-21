@@ -32,8 +32,6 @@ typedef struct {
     int reserved;
 } kc_nets_options_t;
 
-typedef void (*kc_nets_signal_callback_t)(kc_nets_t *ctx);
-
 /**
  * Returns default-initialized options.
  * @return Default-initialized options.
@@ -82,45 +80,6 @@ int kc_nets_stop(kc_nets_t *ctx);
  * @return 1 if stop was requested, 0 otherwise.
  */
 int kc_nets_stop_requested(kc_nets_t *ctx);
-
-/**
- * Registers a signal callback.
- * @param ctx Context handle.
- * @param sig Signal number.
- * @param cb Callback function, or NULL to unregister.
- * @return KC_NETS_OK on success, or a negative error code.
- */
-int kc_nets_on_signal(kc_nets_t *ctx, int sig, kc_nets_signal_callback_t cb);
-
-/**
- * Raises a signal to registered callbacks.
- * @param ctx Context handle.
- * @param sig Signal number.
- * @return KC_NETS_OK on success, or a negative error code.
- */
-int kc_nets_raise_signal(kc_nets_t *ctx, int sig);
-
-/**
- * Store context internally for use by the static signal listener.
- * @param ctx Context handle.
- * @return KC_NETS_OK on success, KC_NETS_EINVAL on failure.
- */
-int kc_nets_listen_signals(kc_nets_t *ctx);
-
-/**
- * Wire a specific OS signal to the library listener.
- * @param ctx    Context handle.
- * @param sig_id OS signal ID.
- * @return KC_NETS_OK on success, KC_NETS_EINVAL on failure.
- */
-int kc_nets_listen_signal(kc_nets_t *ctx, int sig_id);
-
-/**
- * Default signal listener.
- * @param sig Signal number.
- * @return None.
- */
-void kc_nets_signal_listener(int sig);
 
 /**
  * Sends bytes to one network address.

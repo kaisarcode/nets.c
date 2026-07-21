@@ -83,9 +83,8 @@ socket cleanup, and visible negative error codes.
 ## Public API and Ownership
 
 Treat `src/libnets.h` as a compatibility boundary. Preserve protocol constants,
-error codes, context lifecycle, signal callbacks, stop state, caller-owned input,
-stdout response behavior, and build-version reporting unless explicitly
-instructed otherwise.
+error codes, context lifecycle, stop state, caller-owned input, stdout response
+behavior, and build-version reporting unless explicitly instructed otherwise.
 
 The library does not own or close stdin or stdout. It does not retain the host
 or input buffer after `kc_nets_send()` returns.
@@ -103,7 +102,7 @@ Do not claim runtime support based only on successful cross-compilation.
 Preserve exactly:
 
 - `src/nets.c` for CLI parsing and stdin buffering;
-- `src/libnets.c` for TCP, UDP, TLS, socket, stop, and signal behavior;
+- `src/libnets.c` for TCP, UDP, TLS, socket, and stop behavior;
 - `src/libnets.h` for the public API;
 - `src/test.c` for all tests, including network, TLS, stress, platform, and
     integration cases.
